@@ -1193,16 +1193,17 @@ function abilityImprovementStep(
   };
 }
 
-// null when every ability it could raise is already 20.
+// null when every ability it could raise is already at `max`.
 function plusOneStep(
   stepKey: string,
   key: string,
   scores: AbilityScores,
   from: readonly Ability[],
   classDef: ClassDef,
+  max: number,
 ): Step | null {
   const open = ABILITIES.filter(
-    (item) => from.includes(item) && scores[item] < 20,
+    (item) => from.includes(item) && scores[item] < max,
   );
   if (open.length === 0) return null;
   const [best] = abilityPriority(classDef).filter((item) =>
@@ -1348,6 +1349,7 @@ export function classStep(
             scores(),
             from,
             classDef,
+            choice.category === "epicBoon" ? 30 : 20,
           )
         : null;
     if (plusOne) return plusOne;
@@ -1451,7 +1453,14 @@ export function answersOf(
           { kind: "feats", values },
           ...(increase === undefined
             ? []
-            : [{ kind: "abilities", increases: parseIncrease(increase) }]),
+            : [
+                {
+                  kind: "abilities",
+                  increases: parseIncrease(increase),
+                  // An Epic Boon raises a score up to 30.
+                  ...(choice.category === "epicBoon" ? { max: 30 } : {}),
+                },
+              ]),
         ];
       }
       default:

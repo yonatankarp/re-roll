@@ -34,7 +34,7 @@ The engine contains no game rules and no adventure content. **Everything specifi
 | Syntax | `erasableSyntaxOnly` and `verbatimModuleSyntax`, so no enums, runtime namespaces or parameter properties | Node can then run the source directly | [Node TypeScript docs](https://nodejs.org/api/typescript.html) |
 | Import extensions | Write `.ts` in relative imports, with `allowImportingTsExtensions` and `noEmit` in every config | Nothing emits JavaScript, as Node strips types and Vite bundles, so `rewriteRelativeImportExtensions` isn't needed | [Node TypeScript docs](https://nodejs.org/api/typescript.html), [Choosing compiler options](https://www.typescriptlang.org/docs/handbook/modules/guides/choosing-compiler-options.html) |
 | Closed sets | `as const` lists turned into Zod enums and inferred literal unions | Replaces enums, and gives runtime checks and types from one definition | Follows from the syntax row |
-| Runtime | Node 26.13.0, pinned in `.nvmrc`, minimum 24.12 | Type stripping is marked stable from 24.12 and 25.2 | [Node TypeScript docs](https://nodejs.org/api/typescript.html), [Node releases](https://nodejs.org/dist/index.json) |
+| Runtime | Node 26.13.0, pinned in `.nvmrc`; `engines` asks for 26 or later, the only major CI tests | Type stripping is stable from 24.12 and 25.2, but older majors go untested | [Node TypeScript docs](https://nodejs.org/api/typescript.html), [Node releases](https://nodejs.org/dist/index.json) |
 | Modules | `module: nodenext` for shared code, bundler settings only in the UI | Bundler-only code can fail in Node, while Node-valid code generally works in bundlers | [Choosing compiler options](https://www.typescriptlang.org/docs/handbook/modules/guides/choosing-compiler-options.html) |
 | Aliases | No tsconfig `paths`. Plugins import the SDK through the `#sdk` subpath import | Node ignores `tsconfig.json` at runtime, and subpath imports are its supported alternative | [Node TypeScript docs](https://nodejs.org/api/typescript.html) |
 | Repo shape | One package, with plugins as folders rather than workspace packages | Node refuses to strip types under `node_modules`, and workspaces link packages there | [Node TypeScript docs](https://nodejs.org/api/typescript.html) |
@@ -139,12 +139,12 @@ Each layer gets a config that limits what it can reach:
 
 | Config | Covers | `lib` and `types` | Effect |
 |---|---|---|---|
-| `tsconfig.core.json` | `engine/{kernel,story,prep,sdk}`, `plugins/systems/*/core` | `ES2023`, `types: []` | Can't compile against DOM or Node APIs |
-| `tsconfig.tools.json` | `engine/tools`, `engine/platform/node`, `app/cli` | `ES2023`, `types: ["node"]` | Runs directly in Node |
+| `tsconfig.core.json` | `engine/{kernel,run,story,prep,sdk}`, `plugins/systems/*/core`, the fixture system in `tests/fixtures/system-d6` | `ES2023`, `types: []` | Can't compile against DOM or Node APIs |
+| `tsconfig.tools.json` | `engine/tools`, `engine/platform/node`, `app/cli`, and the Vite, Vitest and Playwright configs | `ES2023`, `types: ["node"]` | Runs directly in Node |
 | `tsconfig.test.json` | `tests/`, except the fixture system | `ES2023`, `types: ["node"]` | Tests can read fixtures from disk |
-| `tsconfig.ui.json` (added in step 6) | `engine/shell`, `engine/platform/tauri`, `plugins/systems/*/ui`, `app/desktop` | `ES2023, DOM`, bundler resolution | Built by Vite |
+| `tsconfig.ui.json` (added in step 6) | `engine/shell`, `engine/platform/browser`, `engine/platform/tauri`, `plugins/systems/*/ui`, `app/desktop` | `ES2023, DOM`, bundler resolution | Built by Vite |
 
-All three set `strict`, `types` and `rootDir` explicitly, so changes in compiler defaults can't alter behavior on a later upgrade.
+All four extend `tsconfig.base.json`, which sets `strict` and `rootDir`, and each sets `types` explicitly, so changes in compiler defaults can't alter behavior on a later upgrade.
 
 ### File and network access
 
@@ -164,7 +164,7 @@ export interface ModelClient {
 
 The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `books/` through a read-only endpoint on the dev server. A built desktop app has no checkout: it reads the shipped plugins from its bundled resources, and the player's own from a content folder in its app data, laid out like `books/` (see the README). The fs plugin can only read the two content folders. The app's own commands do its writing: saves go to its app data, and **Install from a zip** unzips a plugin or a book into the content folder's `adventures/`, `rules/`, `assets/` and `library/`, with every path checked again in Rust (section 9).
 
-One exception to "only `engine/platform` touches the network": the narration worker in `engine/shell` downloads the Kokoro-82M model from Hugging Face on first use, and the Tauri CSP allows only that host (section 7.2).
+One exception to "only `engine/platform` touches the network": the narration worker in `engine/shell` downloads the Kokoro-82M model from Hugging Face on first use (section 7.3). The Tauri CSP's `connect-src` allows the page only its own origin, the app's IPC, `blob:`, the model's `huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/` path and Hugging Face's file CDN, `*.cdn.hf.co`. The Store's downloads don't go through the page: the app's `store_fetch` command fetches release assets in Rust from `github.com`, or from `api.github.com` with the repo's token.
 
 ### Domain model
 
@@ -492,7 +492,7 @@ Scene checks are made by the player's character, with the same roll as a check i
 
 An outcome with no `goto` leaves the party in the current scene. The engine tells the system what's allowed through the third argument of `startEncounter`, `{ canFlee, defeatContinues }`, and the system reports the ending as an `encounterEnded` outcome, keeping `partyDefeated` for a loss the run can't survive. A system with no such rules can ignore the argument.
 
-**Party scaling and rests** are the D&D plugin's. An encounter's optional `forPartySize` says how big a party its monster counts were written for, and each count scales to the living party when the fight starts, rounded and never below 1. The plugin's `shortRest` effect spends hit dice between fights.
+**Rests** are the D&D plugin's: its `shortRest` effect spends hit dice between fights. Encounters keep the book's printed monster counts; difficulty settings, not the counts, tune a fight to the party.
 
 **The director** is a plain function that picks the next beat from the eligible ones, using the seed and current state. It also answers `gmOpportunity` events. If an adventure has no eligible beats, the base story continues as written.
 
@@ -550,7 +550,7 @@ The engine also hands `sceneActions` and the UI's `sheets` the scene the party i
 
 **Gap:** attuning between choices doesn't pass the Short Rest's hour.
 
-### 7.2 Narration and ambience
+### 7.3 Narration and ambience
 
 **Ambience.** A scene may name an `ambience` (`wind`, `cave`, `town`, `rain`, `storm`, `campfire` or `none`). Without one, `guessAmbience` in `engine/story/ambience.ts` picks one from words in the text. `engine/shell/ambience.ts` makes each soundscape with Web Audio from looped noise, filters and random one-off sounds, so there are no sound files. A new scene crossfades, and a fight or the narrator ducks it.
 
@@ -560,11 +560,11 @@ The engine also hands `sceneActions` and the UI's `sheets` the scene the party i
 - **Read in the app:** when a clip is missing, `engine/shell/narration-worker.ts` reads the scene in a worker, a sentence at a time, on WebGPU or else WASM. `narration.ts` reads ahead the scenes the current choices lead to, because a CPU reads slower than speech, and restarts a worker that stays silent too long. If no voice can be had, the controls hide rather than fall back to a system voice.
 - **Settings** live in the Sound panel (`sound-panel.ts`), from the game menu.
 
-### 7.3 Adventure covers
+### 7.4 Adventure covers
 
 The main menu shows each adventure as a cover card (`engine/shell/adventure-picker.ts`) with a title plate under the picture. A cover is an entry in a `books/assets/<folder>/index.json` art index with `cover: [<adventure id>, …]`. An adventure with no cover, or one whose picture won't load, still gets a designed card with its title and levels. The shipped adventures have none.
 
-### 7.4 Roll history, Leads and rewind
+### 7.5 Roll history, Leads and rewind
 
 The Journal drawer has three tabs (`engine/shell/journal-tabs.ts`):
 
@@ -1004,13 +1004,13 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 
 **To finish this for an imported book,** parse it again with `npm run import -- parse`. That adds what older imports lack: each class's skill list (until then, any two skills), Martial weapon limits such as the Rogue's (`martialWeaponProperties`, until then all Martial weapons), and the new `subclasses` kind (until then the subclass choice is skipped).
 
-**Combat runs through the engine's decision system.** Initiative and turns are handled entirely by the plugin, and simple code-based tactics play monsters and companions: heal an ally below half HP, otherwise attack the weakest enemy, stepping toward the nearest foe they can hurt by the shortest walk. Companions use cantrips and weapons, and spend at most one spell slot a turn, on a spell that isn't already running.
+**Combat runs through the engine's decision system.** Initiative and turns are handled entirely by the plugin, and simple code-based tactics play monsters and companions: heal an ally below half HP, otherwise attack the weakest enemy, stepping toward the nearest foe they can hurt by the shortest walk. Companions use cantrips and weapons, and spend a spell slot on a spell that isn't already running. Everyone, the player included, spends at most one spell slot a turn between an Action and a Bonus Action (2024 rules), and a turn goes on after acting while the creature can still move.
 
 **The grid:** without a battle map, the party starts along the bottom edge and the enemies 30 feet away along the top. An encounter's `battlemap` (`BattlemapSchema`) instead places the fight on part of a book picture, cut to whole squares, with walls (`#` in one string per row) and each side's start squares. Walls block movement and placement. The schema checks that the party can walk to a monster.
 
 **Fog of war** (`core/fog.ts`): a fight on a battle map covers what the party hasn't seen. After every step, the squares a conscious party member sees for the first time go into a `squaresSeen` event: line of sight against walls (`coverBetween`, searched outward from each viewer and kept per map and square), then light, zones and darkvision (`seeing`). A walk reveals what it passes, not only where it stops. The cells are counted on the picture's own grid and kept in the run's `revealed`, so a later fight on the same picture, even on another crop of it, starts with them shown. The party's side knows only the foes it sees now (`knownFoes`): its tactics, the threat and worth estimates, the fight-start pressure, auto-picked targets, the move order and the options it's offered leave the rest out, and the board, turn order, cues and journal don't show them. With no foe in sight while the fight goes on, a party member walks toward the nearest square the party doesn't see now (`searchStep`). Monsters, as the DM's side, know everything. A fight without `fog` on its `combatStarted`, as in older saves, shows everything.
 
-**Lasting areas** (`core/zones.ts`): a spell's zone is an effect on its caster, fixed where it was aimed or moving with the caster, and a monster's aura is a stat-block passive that moves with it. A zone can hide what's in it (darkness, fog), cost double to cross, wall off squares (`blockedSquares`, which every wall test reads), shed light or sunlight, and act on whoever starts or ends a turn in it or on everyone in it as its owner's turn ends, by resolving its `area` as an action of its owner's (`combat/areas.ts`). A monster with a death burst resolves it where it fell, before the fight is called. Sunlight comes from an encounter's `sunlight` field or a sunlight zone, and hampers or burns the creatures it harms. Timed effects end after their rounds (a minute is ten) through the effect's `lasts` (`combat/durations.ts`), which can also count the target's own turns. Slow's limits, Haste's extra action and lethargy, Time Stop's turns in a row and sealed-away creatures (Resilient Sphere, Forcecage, Maze) work through the same events as everything else; a foe sealed past a stand-off counts as beaten. A controlled creature (Dominate) fights on its controller's side while the control lasts (`state.ts` settleSides), and a controlled player character's choices go to the tactics; a compelled one is driven toward or away from its caster as its turn starts (`combat/fear.ts`), as by Command; and a pacified foe (Suggestion, Calm Emotions) sits the fight out, left be by the party's tactics and counted as beaten. Summons (`combat/summon.ts`): a companion stat block's `play` numbers grow with the slot (or a feature's `level` formula), and its `forms` are picked through the cast's `shapes`, each changing numbers, traits and which actions it has; `animate` brings monster stat blocks, lasting as long as their spell's Concentration with `duration` or coming hostile; `raiseCorpse` with `slain` raises the target its action killed; a caster's `summonBoost` passives give what it calls Temporary Hit Points, Hit Points, Resistances or extra damage; and `retain`, cast between fights, keeps creatures in the caster's `retinue`, which join each fight beside it with the Hit Points they kept (`combat/familiar.ts`).
+**Lasting areas** (`core/zones.ts`): a spell's zone is an effect on its caster, fixed where it was aimed or moving with the caster, and a monster's aura is a stat-block passive that moves with it. A zone can hide what's in it (darkness, fog), cost double to cross, wall off squares (`blockedSquares`, which every wall test reads), shed light or sunlight, and act on whoever starts or ends a turn in it or on everyone in it as its owner's turn ends, by resolving its `area` as an action of its owner's (`combat/areas.ts`). A monster with a death burst resolves it where it fell, before the fight is called. Sunlight comes from an encounter's `sunlight` field (an outdoor daytime fight) or a sunlight zone, and hampers or burns the creatures it harms. Timed effects end after their rounds (a minute is ten) through the effect's `lasts` (`combat/durations.ts`), which can also count the target's own turns. Slow's limits, Haste's extra action and lethargy, Time Stop's turns in a row and sealed-away creatures (Resilient Sphere, Forcecage, Maze) work through the same events as everything else; a foe sealed past a stand-off counts as beaten. A controlled creature (Dominate) fights on its controller's side while the control lasts (`state.ts` settleSides), and a controlled player character's choices go to the tactics; a compelled one is driven toward or away from its caster as its turn starts (`combat/fear.ts`), as by Command; and a pacified foe (Suggestion, Calm Emotions) sits the fight out, left be by the party's tactics and counted as beaten. Summons (`combat/summon.ts`): a companion stat block's `play` numbers grow with the slot (or a feature's `level` formula), and its `forms` are picked through the cast's `shapes`, each changing numbers, traits and which actions it has; `animate` brings monster stat blocks, lasting as long as their spell's Concentration with `duration` or coming hostile; `raiseCorpse` with `slain` raises the target its action killed; a caster's `summonBoost` passives give what it calls Temporary Hit Points, Hit Points, Resistances or extra damage; and `retain`, cast between fights, keeps creatures in the caster's `retinue`, which join each fight beside it with the Hit Points they kept (`combat/familiar.ts`).
 
 **Conditions** apply in play: advantage and disadvantage on attacks (Blinded, Frightened, Invisible, Paralyzed, Poisoned, Prone near or far, Restrained, Stunned, Unconscious and the like), automatic failure of Strength and Dexterity saves while Paralyzed, Petrified, Stunned or Unconscious, disadvantage on Dexterity saves while Restrained, Speed 0 while Grappled, Restrained or Incapacitated, and Incapacitated ending Concentration.
 
@@ -1018,11 +1018,17 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 
 **Deliberately cut for now, each with a `shortcut:` comment where it applies:**
 - **The grid:** no difficult terrain, cover, line of sight or creature sizes, and no flanking. An Opportunity Attack checks only where a move starts and ends.
-- **Character building:** no multiclassing, swapping prepared spells, feat prerequisites, or starting gear from the class tables. Expertise, Eldritch Invocations and other options with no choice data stay as text. Companions' classes don't follow their personalities.
-- **Spell rules:** no swapping prepared spells or one-spell-slot-per-turn rule. Upcasting works for spells whose data has `upcast`, and cantrips scale by tier from their `cantrip` data.
+- **Character building:** no taking a level in a second class while playing (the rules for a multiclass build, its slots and Pact Magic, are in place for content that has one), no swapping prepared spells, feat prerequisites, or starting gear from the class tables. Expertise, Eldritch Invocations and other options with no choice data stay as text. Companions' classes don't follow their personalities.
+- **Spell rules:** no swapping prepared spells. One slot a turn holds only between an Action and a Bonus Action; a reaction's slot on the same turn isn't counted. Upcasting works for spells whose data has `upcast`, and cantrips scale by tier from their `cantrip` data.
 - **Other rules:** no Arcane Recovery, weapon mastery effects or armor training limits, and forced movement pushes or pulls only in a straight line. Section 8.17 lists which class features work.
 - **Recovery after a fight:** anyone down but not dead gets back up with 1 HP, since an adventure doesn't have to offer a rest. HP otherwise carries over between fights.
 - **Branded IDs:** content IDs are checked strings, not per-kind branded types as section 4.4 planned.
+- **Underwater fights:** no encounter sets `underwater` any more, since no book adventure has a fight fully under water; `combat/water.ts` stays for saves that fought one. A fight's environmental effects come from the story's `dnd5.5e:environment` effect, and surprise from `dnd5.5e:surprise`, not from encounter fields.
+- **Hands:** they aren't tracked. A Versatile weapon uses its larger die whenever no Shield is worn, and Great Weapon Fighting counts only Two-Handed weapons.
+
+**Inert by design:** the effect kind `note` is an author's note on what isn't automated, read only by people. Kinds that only some lists act on (`READ_ELSEWHERE` in `combat/effects/leaf.ts`) are reported by `check-pack` when placed where nothing reads them (`core/lint.ts`). **Heroic Inspiration** comes from the rules that grant it and from an adventure's `dnd5.5e:grantInspiration` story effect, the way a DM awards it: goblin-ambush gives it for spotting the ambush, for instance.
+
+**Damage order** (`dealEvents`): a hit carries its target's damage `response` unresisted. Adjustments come first (extra damage, doubling and halving, flat cuts such as Heavy Armor Master or a Ring of Warmth), then Resistance, Spell Resistance counted as one, then Vulnerability, as the 2024 rules order them. Each damage type of a hit lands on its own.
 
 ### 8.13 Loot and gear
 
@@ -1054,8 +1060,8 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 
 - **Legendary actions:** right after another creature's turn, each monster with a use left may take one. `runFinishTurn` splits off `runAdvanceTurn` (frame `dnd5.5e:advanceTurn`) so they run between turns. A legendary move toward a target never provokes Opportunity Attacks.
 - **Legendary Resistance** turns a failed save into a success while uses remain. "Per day" is per fight, since a monster exists for one fight.
-- **Lair actions:** an encounter's `lair` takes them on initiative count 20, losing ties.
-- **Surprise:** an encounter's `surprise` (`party` or `enemies`), or the story effect `dnd5.5e:surprise`, such as after a Stealth check, makes that side roll initiative with disadvantage. The story's word beats the encounter's.
+- **Lair actions:** an encounter's `lair` takes them on initiative count 20, losing ties, and gives every monster in it its in-lair numbers (legendary action uses, Legendary Resistance).
+- **Surprise:** the story effect `dnd5.5e:surprise` (`party` or `enemies`), such as after a Stealth check, makes that side roll initiative with disadvantage in the next fight.
 - **Fleeing:** when the encounter allows it, the player may flee on their turn. Every foe that can reach them gets an Opportunity Attack first, unless they Disengaged, and the party gets away if the player is still standing. Companions run with the player and draw no attacks.
 - **Stand-offs:** after 10 rounds in which nobody takes damage (`STAND_OFF_ROUNDS`, counted in `calmRounds`), the fight ends at the next round: the party withdraws (`flee`) where the encounter allows fleeing, and otherwise the story goes on as after a win, without treasure. A fight can't then run for ever while no decision comes, as when the player is down and stable. As a fight starts, `openedCorners` (`core/grid.ts`) also opens any wall corner that is the party's only way out of its start squares, kept as `openCorners` in `combatStarted`.
 
@@ -1093,12 +1099,16 @@ export interface SaveFile {
 - **Loading** checks the file with Zod, checks every system event against its schema, and rebuilds state by applying the recorded events, so it doesn't re-roll dice and is safe if content later changes. The shell then tells the log again (`retell`) to rebuild the story text, rolls and leads.
 - **Replay checking:** `replayInputs` runs the inputs again from the seed. The tests confirm that the same events and final state come out. This is the core determinism test.
 - **Refusals and warnings:** a different `formatVersion`, a different system or a missing plugin stops the load with a clear message rather than risking the save. A plugin whose hash has changed only warns. The hash covers the plugin's parsed YAML with keys sorted, so comments, key order and formatting don't change it. A save that still holds the older raw-text hash loads without a warning while the text is unchanged, and the next save stores the content hash.
-- **Migrations aren't implemented.** Any other `formatVersion` is refused, so a format change today would orphan old saves. See [issue #35](https://github.com/yonatankarp/re-roll/issues/35). Rule changes don't bump the version either: a save whose answers a newer build no longer offers still loads from its events, but `replayInputs` on it fails (section 8.16).
+- **Migrations:** `migrations` in `save.ts` maps format n to a function that turns a save into format n + 1, and `migrate` runs them in turn before the schema sees the save. The table is empty while the format is 1. A save from a newer format, or one with no migration path, is refused (issue #35). Rule changes don't bump the version either: a save whose answers a newer build no longer offers still loads from its events, but `replayInputs` on it fails (section 8.16).
 - **Autosaves:** each run has one, `saves/<adventure>-<seed>-autosave.json`, written after the start, every choice and every undo. Starting the same seed again replaces it. A failed autosave warns and play carries on. Continue on the main menu loads the newest save.
 - **Manual saves** from the game menu each get a file of their own. Only a run's own autosave is ever overwritten.
 - **Save cards:** the Load screen (`engine/shell/load-screen.ts`) lists saves newest first, as cards with the adventure, character, health, scene, party level, settings such as the difficulty, and scene art. It deletes on a second press. The save format has no clock and no card data, so two records sit beside the saves: `saves/times` (path to ISO time, kept in its old shape so older builds can read it) and `saves/details` (what each card shows). A save made before details existed shows a bare card until it's next loaded.
-- **Where they live:** the browser and the Tauri app keep saves in the webview's `localStorage`, under `saves/` (`withSaves` in `engine/platform/browser/storage.ts`). Content stays read-only, and only `saves/` paths can be written. That store is about 5 MB and tied to the page's origin, so another dev-server port has its own saves. Moving them to real files is still to do. `npm run play` writes files under `<dir>/saves` through Node storage.
-- **Writes:** Node storage writes a temporary file and renames it, so a crash can't destroy a save. `localStorage` writes one key at a time, which is atomic per save.
+- **Where they live:** `app/desktop/main.ts` picks the store, and `withSaveFiles` in `engine/platform/browser/storage.ts` puts it behind `Storage`. Content stays read-only, and only `saves/` paths can be written.
+  - The desktop app keeps each save as a gzipped file in `saves/` inside its app data folder (the README lists it per OS), through the `save_*` commands in `main.rs` (`engine/platform/tauri/saves.ts`). A file name is the percent-encoded save path plus `.gz`.
+  - The browser build keeps saves in the page's IndexedDB (database `re-roll`, `engine/platform/browser/indexeddb.ts`), tied to the page's origin, so another dev-server port has its own saves. When IndexedDB won't open they stay in `localStorage`, which holds about 5 MB.
+  - Saves an older build kept in `localStorage` are copied into the new store once (`moveSavesToFiles`), never over a newer copy, and the originals stay as a backup.
+  - `npm run play` writes files under `<dir>/saves` through Node storage.
+- **Writes:** Node storage and the desktop app write a temporary file and rename it, so a crash can't destroy a save. IndexedDB and `localStorage` write one save at a time, which is atomic per save.
 - **Snapshots** wait until loading is actually slow.
 
 ## 10. Session prep

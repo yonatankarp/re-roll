@@ -123,15 +123,9 @@ export const EncounterSchema = z.strictObject({
       }),
     )
     .min(1),
-  // The party size the counts were written for. Counts scale to the party that actually shows up.
-  forPartySize: z.number().int().min(1).optional(),
   loot: LootSchema.optional(), // found when the party wins
   lair: z.boolean().optional(), // fought in a monster's lair: lair actions and its "in Lair" numbers
-  surprise: z.enum(["party", "enemies"]).optional(), // the side caught unaware, which rolls initiative with disadvantage
   sunlight: z.literal(true).optional(), // fought outdoors in daylight, outside the map's shade (d) and darkness (x)
-  underwater: z.literal(true).optional(), // fought underwater (combat/water.ts)
-  // The environmental effects it's fought in, by id, as a slippery ice floor or a strong wind (environment.ts).
-  environment: z.array(ContentIdSchema).min(1).optional(),
 });
 
 // XP an encounter may be worth per character, by character level. Nothing reads this yet.

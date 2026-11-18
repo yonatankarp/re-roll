@@ -1,6 +1,6 @@
 import { type Frame, frameHandler, type SystemResult } from "#sdk";
 import { z } from "zod";
-import { finalDamage, halved } from "../rules.ts";
+import { halved } from "../rules.ts";
 import type { Resolution } from "../schemas.ts";
 import {
   type Actor,
@@ -129,11 +129,8 @@ export function runApplyMiss(hit: Hit, context: Context): SystemResult {
   const responses = damageResponses(target, context);
   const rolled = resolution.missDamage
     ? resolution.damage.map(({ amount, type }) => ({
-        amount: finalDamage(
-          halved(rollAmount(amount, stats, context.dice)),
-          type,
-          responses,
-        ),
+        amount: halved(rollAmount(amount, stats, context.dice)),
+        response: responses,
         type,
       }))
     : [];

@@ -63,7 +63,7 @@ import {
   type Square,
   squareKey,
 } from "../grid.ts";
-import { seeing } from "../sight.ts";
+import { blindedTo, seeing, unseenInvisible } from "../sight.ts";
 import { hasTactic } from "../tactics.ts";
 import { ALL, FANCY_FOOTWORK, STAY } from "./ids.ts";
 import { grapplesOn } from "./grapple.ts";
@@ -178,7 +178,12 @@ export function provokers(
           sourceId === FANCY_FOOTWORK && casterId === actor.id,
       ) ||
       hasCondition(foe, ...INCAPACITATING) ||
-      (disengaged && !hasPassive(deriveStats(foe, access), "sentinel"))
+      (disengaged && !hasPassive(deriveStats(foe, access), "sentinel")) ||
+      // An Opportunity Attack is made only on a creature it can see; a hidden one is unseen until found.
+      hasTactic(actor, "hidden") ||
+      blindedTo(foe, actor, access) ||
+      unseenInvisible(actor, foe, { ...access, state }) ||
+      seeing(foe, actor.position, state, access) === "none"
     ) {
       return [];
     }
@@ -441,11 +446,8 @@ export function runMove(
     const dealt = dealEvents(
       victim,
       hits.map(({ amount, type }) => ({
-        amount: finalDamage(
-          rollAmount(amount, stats, context.dice),
-          type,
-          responses,
-        ),
+        amount: rollAmount(amount, stats, context.dice),
+        response: responses,
         type,
       })),
       false,
@@ -509,7 +511,7 @@ export function runMove(
         const amount = rollAmount(stride.damage, stats, context.dice);
         const dealt = dealEvents(
           foe,
-          [{ amount: finalDamage(amount, type, responses), type }],
+          [{ amount: amount, response: responses, type }],
           false,
           { ...context, state: now },
           actor,
@@ -1038,7 +1040,11 @@ function aroundTeleport(
       : null;
     const hits = (around.damage ?? []).map(({ amount, type }) => {
       const rolled = rollAmount(amount, stats, context.dice);
-      return { amount: save?.saved ? Math.floor(rolled / 2) : rolled, type };
+      return {
+        amount: save?.saved ? Math.floor(rolled / 2) : rolled,
+        type,
+        response: damageResponses(target, context),
+      };
     });
     const dealt =
       hits.length > 0 ? dealEvents(target, hits, false, context).events : [];

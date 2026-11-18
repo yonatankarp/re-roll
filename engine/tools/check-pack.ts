@@ -24,6 +24,22 @@ export async function checkPlugins(
     const result = await loadRun(storage, catalog, systems, [id]);
     if (!result.ok) {
       for (const issue of result.issues) issues.set(formatIssue(issue), issue);
+      continue;
+    }
+    const { lint } = result.registry.system ?? {};
+    if (!lint) continue;
+    // Only the plugin's own entries, so each is reported once.
+    for (const contentId of result.registry.contentIds()) {
+      if (!contentId.startsWith(`${id}:`)) continue;
+      const entry = result.registry.content(contentId);
+      for (const message of entry ? lint(entry) : []) {
+        const issue = {
+          plugin: id,
+          file: null,
+          message: `${contentId}: ${message}`,
+        };
+        issues.set(formatIssue(issue), issue);
+      }
     }
   }
   return { checked, issues: [...issues.values()] };

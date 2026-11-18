@@ -5,7 +5,7 @@
   "license": "GPL-3.0-or-later",
   "type": "module",
   "engines": {
-    "node": ">=24.12"
+    "node": ">=26"
   },
   "imports": {
     "#sdk": "./engine/sdk/index.ts"
@@ -17,6 +17,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run --project unit",
     "test:soak": "vitest run --project soak",
+    "test:books": "vitest run --project books",
     "test:coverage": "vitest run --project unit --coverage",
     "check-bundle": "node app/cli/check-bundle.ts",
     "test:ui": "playwright test",
@@ -57,6 +58,7 @@
     "vitest": "5.1.0"
   },
   "dependencies": {
+    "@huggingface/transformers": "3.8.1",
     "fflate": "0.8.3",
     "kokoro-js": "1.2.1",
     "three": "0.186.1",

@@ -67,7 +67,7 @@ describe("shared feat and species mechanics", () => {
         },
         contextOf(run, [attacker, target], dice),
       );
-      return counts[8] ?? 0;
+      return counts[10] ?? 0; // a longsword in both hands rolls a d10
     };
     expect(d8s([])).toBe(1);
     expect(d8s(["savage"])).toBe(2);

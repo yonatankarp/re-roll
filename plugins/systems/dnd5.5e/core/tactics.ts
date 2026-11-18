@@ -41,9 +41,20 @@ export function hasTactic(actor: Actor, tactic: Tactic): boolean {
   return tacticsOf(actor, tactic).length > 0;
 }
 
-// Dodging stops while the creature is Incapacitated.
-export function dodging(actor: Actor): boolean {
-  return hasTactic(actor, "dodge") && !hasCondition(actor, ...INCAPACITATING);
+// Dodging stops while the creature is Incapacitated or its Speed is 0.
+export function dodging(actor: Actor, stats: Stats): boolean {
+  return (
+    hasTactic(actor, "dodge") &&
+    !hasCondition(actor, "grappled", "restrained", ...INCAPACITATING) &&
+    // Daze's "move or act" isn't a Speed of 0, so the Dodge it took counts.
+    walkSpeed(
+      {
+        ...actor,
+        budget: { ...actor.budget, action: true, bonusAction: true },
+      },
+      stats,
+    ) > 0
+  );
 }
 
 // The Speed left after Slow, which takes 10 feet off however often it hits.

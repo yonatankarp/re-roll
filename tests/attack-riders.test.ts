@@ -441,7 +441,8 @@ describe("attack-spell riders", () => {
     expect(damageOf(living.events, "a")).toEqual([4]);
     expect(need(living.state, PLAYER_ACTOR).tempHp).toBe(0);
     const dead = settle(run, state, [cast("draining", "ghoul")], MID);
-    expect(damageOf(dead.events, "ghoul")).toEqual([16]);
+    // Each type lands as its own hit, for its own Resistance (#216).
+    expect(damageOf(dead.events, "ghoul")).toEqual([4, 12]);
     expect(need(dead.state, PLAYER_ACTOR).tempHp).toBe(12);
   });
 

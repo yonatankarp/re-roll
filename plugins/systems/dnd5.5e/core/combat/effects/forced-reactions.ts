@@ -10,7 +10,6 @@ import {
   frame,
 } from "../../state.ts";
 import { type Frame, type SystemEvent } from "#sdk";
-import { finalDamage } from "../../rules.ts";
 import { type LeafEffect } from "../../schemas.ts";
 import { speedOf } from "../../tactics.ts";
 import { distanceFeet, pushTo } from "../../grid.ts";
@@ -69,11 +68,8 @@ export function forcedAttack(
     const hurt = dealEvents(
       target,
       forced.otherwise.map(({ amount, type }) => ({
-        amount: finalDamage(
-          rollAmount(amount, stats, context.dice),
-          type,
-          responses,
-        ),
+        amount: rollAmount(amount, stats, context.dice),
+        response: responses,
         type,
       })),
       false,

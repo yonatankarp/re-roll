@@ -661,7 +661,7 @@ function runCastOptionSpent(
       `${String(count)}d${String(price.die)}`,
       context.dice,
     );
-    // Rolled as dealt, past Resistance and Immunity.
+    // Rolled as dealt, past Resistance and Immunity: a price paid, not damage taken (no response).
     events.push(
       ...dealEvents(actor, [{ amount, type: price.type }], false, context)
         .events,

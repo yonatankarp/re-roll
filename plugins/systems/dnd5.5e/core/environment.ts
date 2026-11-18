@@ -16,6 +16,7 @@ import {
   type Passive,
 } from "./schemas.ts";
 import {
+  exhaustionEvents,
   type ActiveEffect,
   type Actor,
   type DiseaseRecord,
@@ -246,10 +247,8 @@ function exposureEvents(
       );
       events.push(...rolled.events);
       if (!rolled.saved) {
+        events.push(...exhaustionEvents(actor, 1, exhaustion));
         exhaustion += 1;
-        events.push(
-          dndEvent(`${NS}:exhaustionChanged`, { actor: actor.id, levels: 1 }),
-        );
       }
     }
     return events;
@@ -465,12 +464,7 @@ function symptomEvents(
   const { symptoms } = disease;
   return [
     ...(symptoms.exhaustion > 0
-      ? [
-          dndEvent(`${NS}:exhaustionChanged`, {
-            actor: actor.id,
-            levels: symptoms.exhaustion,
-          }),
-        ]
+      ? [...exhaustionEvents(actor, symptoms.exhaustion)]
       : []),
     ...(symptoms.blinded
       ? [
@@ -585,10 +579,8 @@ export function diseaseRestEvents(
     } else {
       next = { ...next, failed: next.failed + 1, streak: 0 };
       if (fight.failExhaustion) {
+        events.push(...exhaustionEvents(actor, 1, exhaustion));
         exhaustion += 1;
-        events.push(
-          dndEvent(`${NS}:exhaustionChanged`, { actor: actor.id, levels: 1 }),
-        );
       }
     }
     const cured =

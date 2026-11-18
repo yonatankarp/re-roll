@@ -9,7 +9,7 @@ import {
   rollAmount,
   saveBonus,
 } from "../../stats.ts";
-import { finalDamage, halved } from "../../rules.ts";
+import { halved } from "../../rules.ts";
 import { conditionsApplied } from "../../legendary.ts";
 import { type Resolution } from "../../schemas.ts";
 import { rescuedSave, saveSourceOf, evades } from "../../trait-rules.ts";
@@ -100,9 +100,7 @@ export function nestedSave(
             : save.onSuccessDamage === "half"
               ? halved(total)
               : 0;
-      return scaled > 0
-        ? [{ amount: finalDamage(scaled, type, responses), type }]
-        : [];
+      return scaled > 0 ? [{ amount: scaled, response: responses, type }] : [];
     }),
     false,
     context,

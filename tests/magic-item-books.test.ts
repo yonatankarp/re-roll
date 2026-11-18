@@ -67,7 +67,9 @@ beforeAll(async () => {
   run = createRunContext(loaded.registry, "goblin-ambush");
 });
 
-// The pregen wearing `items` in place of its armor and shield, attuned to every one.
+// The pregen wearing `items` in place of its armor and shield, attuned to every one. The fighter's Defense
+// fighting style adds DEFENSE to its AC in armor.
+const DEFENSE = 1;
 function wearing(items: readonly string[], pregen = "fighter"): Actor {
   const chosen = step(run, startRun(run, "books").state, {
     kind: "answer",
@@ -101,7 +103,9 @@ describe.skipIf(!BOOKS)("the book's magic items", () => {
     const armor = "dmg:item/armor-1-2-or-3--1--chain-mail";
     const shield = "dmg:item/shield-1-2-or-3--3--shield";
     expect(run.content(armor)).toMatchObject({ name: "+1 Chain Mail" });
-    expect(deriveStats(wearing([armor, shield]), run).ac).toBe(16 + 1 + 2 + 3);
+    expect(deriveStats(wearing([armor, shield]), run).ac).toBe(
+      16 + 1 + 2 + 3 + DEFENSE,
+    );
     const wizard = deriveStats(
       wearing(["dmg:item/elven-chain--1--chain-mail"], "wizard"),
       run,
@@ -168,12 +172,12 @@ describe.skipIf(!BOOKS)("the book's magic items' passives", () => {
       type: "armor",
     });
     expect(resists(wearing([armor]))).toEqual(["lightning"]);
-    expect(deriveStats(wearing([armor]), run).ac).toBe(16);
+    expect(deriveStats(wearing([armor]), run).ac).toBe(16 + DEFENSE);
   });
 
   it("wears Dragon Scale Mail for its AC and its dragon's Resistance", () => {
     const mail = "dmg:item/dragon-scale-mail--9--scale-mail";
-    expect(deriveStats(wearing([mail]), run).ac).toBe(14 + 1 + 1);
+    expect(deriveStats(wearing([mail]), run).ac).toBe(14 + 1 + 1 + DEFENSE);
     expect(resists(wearing([mail]))).toEqual(["cold"]);
   });
 
@@ -304,7 +308,9 @@ describe.skipIf(!BOOKS)("the book's magic items' passives", () => {
       if (!existsSync(folder)) continue;
       for (const file of await readdir(folder)) {
         const text = await readFile(`${folder}/${file}`, "utf8");
-        for (const [, slug = ""] of text.matchAll(/\{ spell: ([a-z0-9-]+)/g)) {
+        for (const [, slug = ""] of text.matchAll(
+          /\{ spell: (?:[a-z0-9-]+:spell\/)?([a-z0-9-]+)/g,
+        )) {
           const known =
             run.contentIds().some((id) => id.endsWith(`:spell/${slug}`)) ||
             existsSync(`books/rules/arcana-unleashed/spells/${slug}.yaml`);

@@ -532,10 +532,10 @@ describe("lingering damage", () => {
     const cast = settle(
       run,
       start,
-      [act(PLAYER_ACTOR, `spell:${spell("conjure-elemental")}|@5,5`)],
+      [act(PLAYER_ACTOR, `spell:${spell("conjure-elemental")}|@5,5`), endTurn],
       LOW,
     );
-    // The cast ends the caster's turn, and the spirit seizes the first foe as its turn starts.
+    // The caster ends its turn, and the spirit seizes the first foe as its turn starts.
     expect(restrained(cast.state, "a")).toBe(true);
     expect(damageOf(cast.events, "a")).toEqual([8]);
     const second = settle(run, cast.state, [endTurn], LOW);
@@ -714,7 +714,7 @@ describe("lingering damage", () => {
     const cast = settle(
       run,
       start,
-      [act(PLAYER_ACTOR, `spell:${spell("prismatic-wall")}|@6,6`)],
+      [act(PLAYER_ACTOR, `spell:${spell("prismatic-wall")}|@6,6`), endTurn],
       LOW,
     );
     expect(blockedSquares(cast.state, "sight")).toContain("9,6");
@@ -1467,10 +1467,10 @@ describe("extra damage riders", () => {
           HIGH,
         ).events,
       );
-    expect(damage(PLAYER_ACTOR, "a")).toEqual([7, 6]);
-    expect(damage(PLAYER_ACTOR, "a", true)).toEqual([15, 12]);
-    expect(damage(PLAYER_ACTOR, "b")).toEqual([7]);
-    expect(damage("ally", "a")).toEqual([7]);
+    expect(damage(PLAYER_ACTOR, "a")).toEqual([9, 6]);
+    expect(damage(PLAYER_ACTOR, "a", true)).toEqual([19, 12]);
+    expect(damage(PLAYER_ACTOR, "b")).toEqual([9]);
+    expect(damage("ally", "a")).toEqual([9]);
   });
 
   it("adds Conjure Minor Elementals' damage only to hits in its Emanation, and more with a higher slot", async () => {
@@ -1512,9 +1512,9 @@ describe("extra damage riders", () => {
         ).events,
       );
     };
-    expect(damage("4", "a")).toEqual([7, 16]);
-    expect(damage("5", "a")).toEqual([7, 24]);
-    expect(damage("4", "b")).toEqual([7]);
+    expect(damage("4", "a")).toEqual([9, 16]);
+    expect(damage("5", "a")).toEqual([9, 24]);
+    expect(damage("4", "b")).toEqual([9]);
   });
 
   it("limits Divine Favor to weapons, and counts it once", async () => {
@@ -1546,7 +1546,7 @@ describe("extra damage riders", () => {
           HIGH,
         ).events,
       );
-    expect(damage(sword)).toEqual([7, 4]);
+    expect(damage(sword)).toEqual([9, 4]);
     expect(damage(`spell:${spell("fire-bolt")}`)).toEqual([10]);
   });
 
@@ -1565,7 +1565,7 @@ describe("extra damage riders", () => {
       HIGH,
     );
     expect(smited.decisions[0]?.id).toContain(":afterHit:");
-    expect(damageOf(smited.events, "a")).toEqual([15, 32]); // 4d8 at the highest roll
+    expect(damageOf(smited.events, "a")).toEqual([19, 32]); // 4d8 at the highest roll
     const after = actor(smited.state, PLAYER_ACTOR);
     expect(after.budget.bonusAction).toBe(false);
     expect(after.resourcesSpent).toEqual({ "slot:1": 1 });
@@ -1581,12 +1581,12 @@ describe("extra damage riders", () => {
       const option = decision.options.find((item) => item.id.endsWith("|3"));
       return option?.id ?? "";
     });
-    expect(damageOf(upcast.events, "a")).toEqual([7, 32]);
+    expect(damageOf(upcast.events, "a")).toEqual([9, 32]);
     expect(actor(upcast.state, PLAYER_ACTOR).resourcesSpent).toEqual({
       "slot:3": 1,
     });
     const declined = settle(run, state, frames, HIGH, () => "decline");
-    expect(damageOf(declined.events, "a")).toEqual([7]);
+    expect(damageOf(declined.events, "a")).toEqual([9]);
     expect(actor(declined.state, PLAYER_ACTOR).resourcesSpent).toEqual({});
   });
 
@@ -2851,7 +2851,7 @@ describe("class feature building blocks", () => {
           HIGH,
         ).events,
       );
-    expect(hit("weapon:srd52:item/longsword")).toEqual([9]); // 1d8 - 1 Str + 2
+    expect(hit("weapon:srd52:item/longsword")).toEqual([11]); // 1d10 (Versatile, no Shield) - 1 Str + 2
     expect(hit(`spell:${spell("fire-bolt")}`)).toEqual([10]);
   });
 
@@ -3076,16 +3076,17 @@ describe("class feature building blocks", () => {
 
 describe("replay", () => {
   it("replays whole fights exactly, with the new spells cast along the way", async () => {
+    // The Bonus Action ones first, since one slot a turn would leave them behind an Action's.
     const spells = [
+      "hex",
+      "divine-favor",
+      "divine-smite",
+      "searing-smite",
       "moonbeam",
       "spirit-guardians",
       "magic-missile",
       "scorching-ray",
       "eldritch-blast",
-      "hex",
-      "divine-favor",
-      "divine-smite",
-      "searing-smite",
       "faerie-fire",
       "guiding-bolt",
       "fireball",
@@ -3123,13 +3124,18 @@ describe("replay", () => {
       const inputs: Input[] = [{ kind: "start" }];
       for (let count = 0; pending && count < 300; count += 1) {
         const { options }: Decision = pending;
-        const fresh = options.find((option) =>
-          [...untried].some((slug) => option.id.includes(spell(slug))),
-        );
+        const fresh = [...untried]
+          .map((slug) =>
+            options.find((option) => option.id.includes(spell(slug))),
+          )
+          .find((option) => option !== undefined);
+        // Walking about once the action is spent only uses up the decisions, so random play doesn't.
+        const picks = options.filter((option) => option.id !== MOVE);
         const chosen =
           options.find((option) => option.id === "srd52:pregen/wizard") ??
           fresh ??
-          options[dice.below(options.length)];
+          picks[dice.below(picks.length)] ??
+          options[0];
         if (!chosen) throw new Error(`${pending.id} has no options`);
         for (const slug of untried) {
           if (chosen.id.includes(spell(slug))) untried.delete(slug);

@@ -11,6 +11,7 @@ import {
   type Stats,
 } from "../../stats.ts";
 import {
+  exhaustionEvents,
   type Actor,
   applyDndEvent,
   cannotHeal,
@@ -24,7 +25,7 @@ import {
   NS,
 } from "../../state.ts";
 import { type SystemEvent } from "#sdk";
-import { halved } from "../../rules.ts";
+import { type DamageResponse, finalDamage, halved } from "../../rules.ts";
 import {
   type Ability,
   type Amount,
@@ -171,7 +172,7 @@ function severedEvents(
       actor: target.id,
       resource: passive.resource,
     }),
-    dndEvent(`${NS}:exhaustionChanged`, { actor: target.id, levels: 1 }),
+    ...exhaustionEvents(target, 1),
     dndEvent(`${NS}:summoned`, {
       actor: {
         ...freshActor({
@@ -468,12 +469,7 @@ function enduredEvents(
             ]
           : []),
         ...(trait.exhaustion
-          ? [
-              dndEvent(`${NS}:exhaustionChanged`, {
-                actor: target.id,
-                levels: trait.exhaustion,
-              }),
-            ]
+          ? [...exhaustionEvents(target, trait.exhaustion)]
           : []),
         ...trait.effects.map((modifier) =>
           dndEvent(`${NS}:effectAdded`, {
@@ -529,7 +525,13 @@ export function burstEvents(
       ...save.events,
       ...dealEvents(
         foe,
-        [{ amount: save.saved ? halved(rolled) : rolled, type: burst.type }],
+        [
+          {
+            amount: save.saved ? halved(rolled) : rolled,
+            type: burst.type,
+            response: damageResponses(foe, context),
+          },
+        ],
         false,
         context,
       ).events,
@@ -587,9 +589,17 @@ function furyEvents(target: Actor, context: Context): SystemEvent[] {
   ];
 }
 
+// A hit with its target's `response` is still unresisted: its Resistance, Vulnerability and Immunity come last,
+// after every cut, as the rules order them. One without has them already, or ignores them.
+export interface Hit {
+  readonly amount: number;
+  readonly type: Damage["type"];
+  readonly response?: DamageResponse;
+}
+
 export function dealEvents(
   target: Actor,
-  hits: readonly { readonly amount: number; readonly type: Damage["type"] }[],
+  hits: readonly Hit[],
   critical: boolean,
   context: Context,
   source?: Actor, // the creature dealing it, for a reaction aimed back at it, as Backlash's
@@ -600,20 +610,36 @@ export function dealEvents(
   let dealt = 0;
   for (const given of hits) {
     const current = state.actors[target.id] ?? target;
+    // Damage it's immune to or absorbs sets off nothing that would lessen or add to it.
+    const cancelled =
+      given.response?.immunities?.includes(given.type) === true ||
+      given.response?.absorbs?.includes(given.type) === true;
+    const none = { amount: 0, events: [] };
     // Elemental Bane: the first damage of its type each turn deals more.
-    const baned = baneExtra(current, given, { ...context, state });
+    const baned = cancelled
+      ? none
+      : baneExtra(current, given, { ...context, state });
     const hit = { ...given, amount: given.amount + baned.amount };
-    const reduced = reducedHit(
+    const reduced = cancelled
+      ? { amount: hit.amount, events: [] }
+      : reducedHit(
+          current,
+          hit.amount,
+          hit.type,
+          { ...context, state },
+          magical,
+        );
+    const resisted = resistedHit(
       current,
-      hit.amount,
-      hit.type,
+      reduced.amount,
+      hit,
       { ...context, state },
       magical,
     );
     // A reaction such as Vitality Ward may lessen it before it lands.
     const lessened = beforeDamage(
       current,
-      reduced.amount,
+      resisted,
       hit.type,
       { ...context, state },
       source && (state.actors[source.id] ?? source),
@@ -739,6 +765,7 @@ export function dealEvents(
         damage.map(({ amount, type }) => ({
           amount: amount.dice ? rollDiceNotation(amount.dice, context.dice) : 0,
           type,
+          response: damageResponses(hurt, { ...context, state }),
         })),
         false,
         { ...context, state },
@@ -763,6 +790,35 @@ export function dealEvents(
   return { events, dealt };
 }
 
+// Resistance, Vulnerability and Immunity, after the cuts. Spell Resistance is Resistance to a spell's damage, so it
+// counts once with the bearer's own.
+function resistedHit(
+  target: Actor,
+  amount: number,
+  hit: Hit,
+  context: Context,
+  magical: boolean,
+): number {
+  const spellproof =
+    magical &&
+    hasPassive(deriveStats(target, context), "spellDamageResistance");
+  if (hit.response) {
+    const { resistances = [] } = hit.response;
+    return finalDamage(
+      amount,
+      hit.type,
+      spellproof
+        ? { ...hit.response, resistances: [...resistances, hit.type] }
+        : hit.response,
+    );
+  }
+  return spellproof &&
+    amount > 0 &&
+    !damageResponses(target, context).resistances.includes(hit.type)
+    ? halved(amount)
+    : amount;
+}
+
 // Resistance (the cantrip): damage of the type picked is cut by a die, once a turn. A worn item's cuts it every time,
 // as a Ring of Warmth's 2d8 off Cold damage.
 function reducedHit(
@@ -770,17 +826,9 @@ function reducedHit(
   amount: number,
   type: Damage["type"],
   context: Context,
-  magical = false,
+  magical: boolean,
 ): { amount: number; events: SystemEvent[] } {
   const targetStats = deriveStats(target, context);
-  // Spell Resistance: a spell's damage is halved, unless the bearer resists its type already.
-  if (
-    magical &&
-    hasPassive(targetStats, "spellDamageResistance") &&
-    !damageResponses(target, context).resistances.includes(type)
-  ) {
-    amount = Math.floor(amount / 2);
-  }
   const { combat } = context.state;
   const turnKey = (id: string) =>
     `${id}@${String(combat?.round ?? 0)}:${String(combat?.index ?? 0)}`;

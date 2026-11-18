@@ -58,6 +58,7 @@ import {
 import {
   type Actor,
   type DndState,
+  deathSaveOutcome,
   EVENT_SCHEMAS,
   equipped,
   isDead,
@@ -1242,11 +1243,13 @@ function roll(
       const data = EVENT_SCHEMAS["dnd5.5e:deathSaveRolled"].parse(
         event.payload,
       );
+      const counts = data.counts ?? data.natural;
+      const total = data.total ?? counts;
       return {
         actor: name(data.actor),
         label: "Death save",
-        math: `${String(data.natural)} vs 10`,
-        success: data.natural >= 10,
+        math: `${String(total)} vs 10`,
+        success: deathSaveOutcome(counts, total).success,
       };
     }
     case "dnd5.5e:damaged": {
@@ -1441,6 +1444,8 @@ function describe(
       const levels = Math.abs(data.levels);
       return `${name(data.actor)} ${data.levels > 0 ? "gains" : "loses"} ${String(levels)} level${levels === 1 ? "" : "s"} of Exhaustion.`;
     }
+    case "dnd5.5e:exhaustedToDeath":
+      return `${name(EVENT_SCHEMAS["dnd5.5e:exhaustedToDeath"].parse(payload).actor)} dies of Exhaustion.`;
     case "dnd5.5e:conditionRemoved": {
       const data = EVENT_SCHEMAS["dnd5.5e:conditionRemoved"].parse(payload);
       return `${name(data.actor)} is no longer ${data.condition}.`;

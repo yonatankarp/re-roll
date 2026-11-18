@@ -6,7 +6,7 @@ import { actorOf, findAction, slotLevelFor } from "../combat/queries.ts";
 import { tableOf, tableRoll } from "../combat/reactions.ts";
 import { ItemSchema } from "../schemas.ts";
 import { type Actor, dndEvent, frame, NS } from "../state.ts";
-import { deriveStats, lookup, rollAmount } from "../stats.ts";
+import { damageResponses, deriveStats, lookup, rollAmount } from "../stats.ts";
 import { abilityCheck } from "./checks.ts";
 import { CHECK_END } from "./ids.ts";
 import {
@@ -57,6 +57,7 @@ export const attuneSaveHandlers = {
       const hits = saved.map((damage) => ({
         amount: rollAmount(damage.amount, stats, context.dice),
         type: damage.type,
+        response: damageResponses(actor, context),
       }));
       return {
         events: [

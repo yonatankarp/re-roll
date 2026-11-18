@@ -2,7 +2,7 @@
 
 A single-player fantasy role-playing game on the fifth edition 2024 rules (SRD 5.2). You play one hero with a party of companions through an adventure: read the scene, pick what to do, roll your checks, and fight turn by turn on a battle map. It aims to feel like a night at the table, not a rules tool, and it looks like a page from the Player's Handbook.
 
-It runs as a desktop app on macOS, Windows and Linux, or in your browser.
+It runs as a desktop app on macOS, Windows and Linux. From a checkout of this repository it also runs in your browser.
 
 ![A slideshow of five screenshots: a scene with art, the story and numbered choices, some with a skill check; the adventure library with the shipped adventures and adventures from your books; picking a ready hero; a fight on the battle map with your party at the bottom and the foes at the top; and the character sheet in a drawer beside the map](docs/images/tour.webp)
 
@@ -31,7 +31,7 @@ There are no ready-made downloads yet, so you build it from this repository.
 The desktop app needs Rust and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS:
 
 - **macOS:** the Xcode Command Line Tools (`xcode-select --install`).
-- **Linux** (Debian or Ubuntu): `sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev patchelf build-essential`.
+- **Linux** (Debian or Ubuntu): `sudo apt install libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev`, the list CI installs.
 - **Windows:** the Microsoft C++ Build Tools (MSVC) and WebView2, which Windows 10 and 11 usually already have.
 
 `npm run desktop:build` makes an installable app for the OS you run it on. [docs/release.md](docs/release.md) says what it holds.
@@ -43,7 +43,15 @@ Two original adventures come with the game, built on the free SRD 5.2 rules:
 
 ### Saves
 
-The game saves after every choice, and **Save game** in the menu keeps a save of its own. In the browser and the desktop app, saves live in the page's `localStorage`. Each address has its own, so the game on another `--port` has a separate save list. Clearing site data deletes them.
+The game saves after every choice, and **Save game** in the menu keeps a save of its own.
+
+The desktop app keeps each save as a gzipped file in the `saves` folder inside its app data folder. Copy that folder to back up your saves:
+
+- **macOS:** `~/Library/Application Support/app.re-roll.desktop/saves`
+- **Windows:** `%APPDATA%\app.re-roll.desktop\saves`
+- **Linux:** `~/.local/share/app.re-roll.desktop/saves`
+
+In the browser (`npm run ui`), saves live in the page's IndexedDB, or in its `localStorage` when the browser blocks IndexedDB. Each address has its own, so the game on another `--port` has a separate save list, and clearing site data deletes them. Saves an older build kept in `localStorage` are copied over once on the next launch.
 
 ## Add your own books
 
@@ -65,7 +73,7 @@ With `npm run ui` or `npm run desktop` from a checkout, put your content in a `b
 
 ## For developers
 
-Under the game is an event-sourced TypeScript engine that knows no game rules. The rules come from a system plugin (`plugins/systems/dnd5.5e`), and the content from data plugins (`plugins/adventures`, `plugins/rules`). Every action is a logged input, so a save replays exactly. The UI is a Vite app (`app/desktop`) that also ships as a [Tauri](https://tauri.app) app. The design is in [docs/technical-design.md](docs/technical-design.md).
+Under the game is an event-sourced TypeScript engine that knows no game rules. The rules come from a system plugin (`plugins/systems/dnd5.5e`), and the content from data plugins (`plugins/adventures`, `plugins/rules`). Every action is a logged input, so a save replays exactly. The UI is a Vite app (`app/desktop`) that also ships as a [Tauri](https://tauri.app) app. The design is in [docs/technical-design.md](docs/technical-design.md). [CONTRIBUTING.md](CONTRIBUTING.md) has the rules for changes, [docs/writing-an-adventure.md](docs/writing-an-adventure.md) a short guide to writing an adventure, and [SECURITY.md](SECURITY.md) how to report a vulnerability.
 
 ### Commands
 

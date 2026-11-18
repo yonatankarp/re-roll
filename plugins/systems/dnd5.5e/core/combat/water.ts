@@ -1,9 +1,16 @@
-// A fight underwater, as an encounter's `underwater` marks it (2024 Underwater Combat and Suffocation): melee weapons
+// A fight underwater, as an older save's `underwater` fight marks it (no encounter sets it now, #216; 2024 Underwater Combat and Suffocation): melee weapons
 // are hampered without a Swim Speed unless they pierce, ranged weapons miss past their normal range and are hampered
 // within it, everything resists Fire, and a creature that can't breathe water runs out of breath and suffocates.
 import type { ContentAccess, SystemEvent } from "#sdk";
 import type { Passive, Resolution } from "../schemas.ts";
-import { type Actor, type DndState, dndEvent, isDead, NS } from "../state.ts";
+import {
+  exhaustionEvents,
+  type Actor,
+  type DndState,
+  dndEvent,
+  isDead,
+  NS,
+} from "../state.ts";
 import {
   type KnownAction,
   abilityModifier,
@@ -121,7 +128,7 @@ export function suffocationEvents(
     return [];
   }
   return [
-    dndEvent(`${NS}:exhaustionChanged`, { actor: actor.id, levels: 1 }),
+    ...exhaustionEvents(actor, 1),
     dndEvent(`${NS}:effectAdded`, {
       actor: actor.id,
       effect: {

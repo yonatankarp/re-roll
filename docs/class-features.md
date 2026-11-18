@@ -11,34 +11,34 @@ through the real level-up decisions, and each feature gained is checked against 
 
 | Class | Working | Partial | Text-only |
 | --- | --- | --- | --- |
-| Barbarian | 19 | 4 | 15 |
-| Bard | 13 | 2 | 13 |
-| Cleric | 20 | 1 | 10 |
-| Druid | 13 | 2 | 18 |
-| Fighter | 37 | 3 | 7 |
-| Monk | 20 | 8 | 13 |
-| Paladin | 21 | 5 | 12 |
-| Ranger | 17 | 3 | 18 |
-| Rogue | 22 | 2 | 14 |
-| Sorcerer | 22 | 2 | 13 |
-| Warlock | 25 | 3 | 13 |
-| Wizard | 12 | 1 | 17 |
+| Barbarian | 37 | 1 | 0 |
+| Bard | 26 | 0 | 2 |
+| Cleric | 30 | 1 | 0 |
+| Druid | 32 | 0 | 1 |
+| Fighter | 44 | 1 | 2 |
+| Monk | 41 | 0 | 0 |
+| Paladin | 36 | 1 | 1 |
+| Ranger | 31 | 1 | 6 |
+| Rogue | 33 | 2 | 3 |
+| Sorcerer | 35 | 0 | 2 |
+| Warlock | 38 | 0 | 3 |
+| Wizard | 23 | 0 | 7 |
 
 ## Features
 
 | Class | Level | Feature | Status | Why |
 | --- | --- | --- | --- | --- |
-| Barbarian | 1 | Rage | partial | resource rage max 2; bonusAction+rage: resistance x3, damageBonus |
-| Barbarian | 1 | Unarmored Defense | partial | passive: acFormula |
+| Barbarian | 1 | Rage | working | resource rage max 2; bonusAction+rage: resistance x3, damageBonus, advantage x2, actionLimit, endConcentration |
+| Barbarian | 1 | Unarmored Defense | working | passive: acFormula |
 | Barbarian | 1 | Weapon Mastery | working | level choice: weapon masteries |
-| Barbarian | 2 | Danger Sense | text-only | needs Advantage on one ability's saves |
+| Barbarian | 2 | Danger Sense | working | passive: saveAdvantage |
 | Barbarian | 2 | Reckless Attack | working | free: advantage x2 |
 | Barbarian | 3 | Barbarian Subclass | working | level choice: subclass |
-| Barbarian | 3 | Primal Knowledge | text-only | out of combat only: skills, tools or languages |
+| Barbarian | 3 | Primal Knowledge | working | passive: checkAbility |
 | Barbarian | 4 | Ability Score Improvement | working | level choice: feat |
 | Barbarian | 5 | Extra Attack | working | attacks per action: 2 |
-| Barbarian | 5 | Fast Movement | partial | passive: bonus |
-| Barbarian | 7 | Feral Instinct | text-only | no mechanics |
+| Barbarian | 5 | Fast Movement | working | passive: bonus |
+| Barbarian | 7 | Feral Instinct | working | passive: initiativeAdvantage |
 | Barbarian | 7 | Instinctive Pounce | working | passive: activationRider |
 | Barbarian | 9 | Brutal Strike | working | free (triggered): automatic damage; free (triggered): automatic damage, bonus |
 | Barbarian | 11 | Relentless Rage | working | resource relentless-rage max 10; passive: dropToOne |
@@ -47,64 +47,64 @@ through the real level-up decisions, and each feature gained is checked against 
 | Barbarian | 17 | Improved Brutal Strike | working | passive: strikeEffects |
 | Barbarian | 18 | Indomitable Might | working | passive: scoreFloor |
 | Barbarian | 19 | Epic Boon | working | level choice: epic boon |
-| Barbarian | 20 | Primal Champion | text-only | no mechanics |
+| Barbarian | 20 | Primal Champion | working | passive: scoreIncrease |
 | Barbarian (Path of the Berserker) | 3 | Frenzy | working | passive: extraDamage |
-| Barbarian (Path of the Berserker) | 6 | Mindless Rage | text-only | no mechanics |
-| Barbarian (Path of the Berserker) | 10 | Retaliation | text-only | no mechanics |
+| Barbarian (Path of the Berserker) | 6 | Mindless Rage | working | passive: activationRider |
+| Barbarian (Path of the Berserker) | 10 | Retaliation | working | reaction (triggered): strike |
 | Barbarian (Path of the Berserker) | 14 | Intimidating Presence | working | resource intimidating-presence max 1; bonusAction+intimidating-presence: condition frightened; rage: regain |
-| Barbarian (Path of the Wild Heart) | 3 | Animal Speaker | text-only | no mechanics |
-| Barbarian (Path of the Wild Heart) | 3 | Rage of the Wilds | text-only | no mechanics |
-| Barbarian (Path of the Wild Heart) | 6 | Aspect of the Wilds | text-only | no mechanics |
-| Barbarian (Path of the Wild Heart) | 10 | Nature Speaker | text-only | no mechanics |
-| Barbarian (Path of the Wild Heart) | 14 | Power of the Wilds | text-only | no mechanics |
+| Barbarian (Path of the Wild Heart) | 3 | Animal Speaker | working | always-prepared spells: 2 |
+| Barbarian (Path of the Wild Heart) | 3 | Rage of the Wilds | working | level choice: 3 variants |
+| Barbarian (Path of the Wild Heart) | 6 | Aspect of the Wilds | partial | level choice: 3 variants |
+| Barbarian (Path of the Wild Heart) | 10 | Nature Speaker | working | always-prepared spells: 1 |
+| Barbarian (Path of the Wild Heart) | 14 | Power of the Wilds | working | level choice: 3 variants |
 | Barbarian (Path of the World Tree) | 3 | Vitality of the Tree | working | passive: activationRider, turnTempHp |
-| Barbarian (Path of the World Tree) | 6 | Branches of the Tree | text-only | no mechanics |
+| Barbarian (Path of the World Tree) | 6 | Branches of the Tree | working | reaction (triggered): actionLimit |
 | Barbarian (Path of the World Tree) | 10 | Battering Roots | working | passive: weaponRider, extraMastery |
-| Barbarian (Path of the World Tree) | 14 | Travel along the Tree | partial | passive: activationRider; bonusAction: teleport |
+| Barbarian (Path of the World Tree) | 14 | Travel along the Tree | working | resource travel-along-the-tree max 1; passive: activationRider; bonusAction: teleport; bonusAction+travel-along-the-tree: teleport |
 | Barbarian (Path of the Zealot) | 3 | Divine Fury | working | passive: extraDamage |
 | Barbarian (Path of the Zealot) | 3 | Warrior of the Gods | working | resource warrior-of-the-gods max 4; bonusAction: heal |
-| Barbarian (Path of the Zealot) | 6 | Fanatical Focus | text-only | no mechanics |
-| Barbarian (Path of the Zealot) | 10 | Zealous Presence | text-only | no mechanics |
-| Barbarian (Path of the Zealot) | 14 | Rage of the Gods | text-only | no mechanics |
-| Bard | 1 | Bardic Inspiration | partial | resource bardic-inspiration max 1; bonusAction+bardic-inspiration: bonus |
+| Barbarian (Path of the Zealot) | 6 | Fanatical Focus | working | resource fanatical-focus max 1; passive: activationRider; fanatical-focus (triggered): reroll, rollBonus |
+| Barbarian (Path of the Zealot) | 10 | Zealous Presence | working | resource zealous-presence max 1; bonusAction+zealous-presence: advantage x2; bonusAction+rage: advantage x2 |
+| Barbarian (Path of the Zealot) | 14 | Rage of the Gods | working | resource rage-of-the-gods max 1; passive: dropToOne; rage-of-the-gods: movementMode, resistance x3 |
+| Bard | 1 | Bardic Inspiration | working | resource bardic-inspiration max 1; bonusAction+bardic-inspiration: inspired |
 | Bard | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
-| Bard | 2 | Expertise | text-only | out of combat only: skills, tools or languages |
+| Bard | 2 | Expertise | text-only | no mechanics |
 | Bard | 2 | Jack of All Trades | working | passive: halfProficiency |
 | Bard | 3 | Bard Subclass | working | level choice: subclass |
 | Bard | 4 | Ability Score Improvement | working | level choice: feat |
 | Bard | 5 | Font of Inspiration | working | resource bardic-inspiration max 1; bardic-inspiration spent by other features; slot: regain |
-| Bard | 7 | Countercharm | text-only | no mechanics |
+| Bard | 7 | Countercharm | working | reaction (triggered): reroll |
 | Bard | 10 | Magical Secrets | working | wider spell lists |
 | Bard | 18 | Superior Inspiration | working | resource bardic-inspiration max 1; bardic-inspiration spent by other features |
 | Bard | 19 | Epic Boon | working | level choice: epic boon |
 | Bard | 20 | Words of Creation | working | passive: extraTarget; always-prepared spells: 2 |
-| Bard (College of Dance) | 3 | Dazzling Footwork | partial | passive: acFormula |
-| Bard (College of Dance) | 6 | Inspiring Movement | text-only | no mechanics |
-| Bard (College of Dance) | 6 | Tandem Footwork | text-only | no mechanics |
-| Bard (College of Dance) | 14 | Leading Evasion | text-only | no mechanics |
-| Bard (College of Glamour) | 3 | Beguiling Magic | text-only | no mechanics |
-| Bard (College of Glamour) | 3 | Mantle of Inspiration | text-only | no mechanics |
-| Bard (College of Glamour) | 6 | Mantle of Majesty | text-only | no mechanics |
-| Bard (College of Glamour) | 14 | Unbreakable Majesty | text-only | no mechanics |
+| Bard (College of Dance) | 3 | Dazzling Footwork | working | passive: acFormula, advantage; action: attack damage; free: attack damage |
+| Bard (College of Dance) | 6 | Inspiring Movement | working | reaction+bardic-inspiration (triggered): reactionMove |
+| Bard (College of Dance) | 6 | Tandem Footwork | working | passive: initiativeDie |
+| Bard (College of Dance) | 14 | Leading Evasion | working | passive: evasion |
+| Bard (College of Glamour) | 3 | Beguiling Magic | working | resource beguiling-magic max 1; passive: castRider; bardic-inspiration: regain; always-prepared spells: 2 |
+| Bard (College of Glamour) | 3 | Mantle of Inspiration | working | bonusAction+bardic-inspiration: tempHp, reactionMove |
+| Bard (College of Glamour) | 6 | Mantle of Majesty | working | resource mantle-of-majesty max 1; bonusAction+mantle-of-majesty: actionLimit x3, condition prone, compelled x2, drop; bonusAction: actionLimit x3, condition prone, compelled x2, drop; slot: regain; always-prepared spells: 1 |
+| Bard (College of Glamour) | 14 | Unbreakable Majesty | working | resource unbreakable-majesty max 1; bonusAction+unbreakable-majesty: majesty |
 | Bard (College of Lore) | 3 | Bonus Proficiencies | text-only | no mechanics |
-| Bard (College of Lore) | 3 | Cutting Words | text-only | no mechanics |
+| Bard (College of Lore) | 3 | Cutting Words | working | reaction+bardic-inspiration (triggered): rollBonus; reaction+bardic-inspiration (triggered): reduceDamage |
 | Bard (College of Lore) | 6 | Magical Discoveries | working | level choice: spells |
 | Bard (College of Lore) | 14 | Peerless Skill | working | passive: checkRescue, missBoost |
-| Bard (College of Valor) | 3 | Combat Inspiration | text-only | no mechanics |
-| Bard (College of Valor) | 3 | Martial Training | text-only | no mechanics |
+| Bard (College of Valor) | 3 | Combat Inspiration | working | passive: combatInspiration |
+| Bard (College of Valor) | 3 | Martial Training | working | passive: martialTraining, armorTraining |
 | Bard (College of Valor) | 6 | Extra Attack | working | attacks per action: 2 |
 | Bard (College of Valor) | 14 | Battle Magic | working | bonusAction: weaponAttack |
 | Cleric | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
-| Cleric | 1 | Divine Order | text-only | needs a choice between the orders at level-up |
+| Cleric | 1 | Divine Order | working | level choice: 2 variants |
 | Cleric | 2 | Channel Divinity | working | resource cleric-channel-divinity max 2; action+cleric-channel-divinity: heal; action+cleric-channel-divinity: save damage; action+cleric-channel-divinity: save damage; action+cleric-channel-divinity: condition frightened, condition incapacitated |
 | Cleric | 3 | Cleric Subclass | working | level choice: subclass |
 | Cleric | 4 | Ability Score Improvement | working | level choice: feat |
 | Cleric | 5 | Sear Undead | working | passive: activationRider |
 | Cleric | 7 | Blessed Strikes | working | level choice: 2 variants |
-| Cleric | 10 | Divine Intervention | text-only | no mechanics |
+| Cleric | 10 | Divine Intervention | working | resource divine-intervention max 1; action+divine-intervention: copySpell |
 | Cleric | 14 | Improved Blessed Strikes | partial | level choice: 2 variants |
 | Cleric | 19 | Epic Boon | working | level choice: epic boon |
-| Cleric | 20 | Greater Divine Intervention | text-only | no mechanics |
+| Cleric | 20 | Greater Divine Intervention | working | resource greater-divine-intervention max 1; action+divine-intervention+greater-divine-intervention: copySpell |
 | Cleric (Life Domain) | 3 | Disciple of Life | working | passive: spellHealing |
 | Cleric (Life Domain) | 3 | Life Domain Spells | working | always-prepared spells: 4 |
 | Cleric (Life Domain) | 3 | Preserve Life | working | action+cleric-channel-divinity: heal |
@@ -112,52 +112,52 @@ through the real level-up decisions, and each feature gained is checked against 
 | Cleric (Life Domain) | 17 | Supreme Healing | working | passive: maxHealingDice |
 | Cleric (Light Domain) | 3 | Light Domain Spells | working | always-prepared spells: 4 |
 | Cleric (Light Domain) | 3 | Radiance of the Dawn | working | action+cleric-channel-divinity: save damage |
-| Cleric (Light Domain) | 3 | Warding Flare | text-only | no mechanics |
-| Cleric (Light Domain) | 6 | Improved Warding Flare | text-only | no mechanics |
-| Cleric (Light Domain) | 17 | Corona of Light | text-only | no mechanics |
+| Cleric (Light Domain) | 3 | Warding Flare | working | resource warding-flare max 1; reaction+warding-flare (triggered): replaceRoll |
+| Cleric (Light Domain) | 6 | Improved Warding Flare | working | resource warding-flare max 1; reaction+warding-flare (triggered): replaceRoll, tempHp |
+| Cleric (Light Domain) | 17 | Corona of Light | working | resource corona-of-light max 1; passive: aura x2; action+corona-of-light: aspect |
 | Cleric (Trickery Domain) | 3 | Blessing of the Trickster | working | action: advantage |
 | Cleric (Trickery Domain) | 3 | Trickery Domain Spells | working | always-prepared spells: 4 |
-| Cleric (Trickery Domain) | 3 | Invoke Duplicity | text-only | no mechanics |
-| Cleric (Trickery Domain) | 6 | Trickster’s Transposition | text-only | no mechanics |
-| Cleric (Trickery Domain) | 17 | Improved Duplicity | text-only | no mechanics |
-| Cleric (War Domain) | 3 | Guided Strike | text-only | no mechanics |
+| Cleric (Trickery Domain) | 3 | Invoke Duplicity | working | passive: distract; bonusAction+cleric-channel-divinity: zone; bonusAction: moveZone; free: endOwn |
+| Cleric (Trickery Domain) | 6 | Trickster’s Transposition | working | free: swapImage |
+| Cleric (Trickery Domain) | 17 | Improved Duplicity | working | passive: distract; free: heal, endOwn |
+| Cleric (War Domain) | 3 | Guided Strike | working | cleric-channel-divinity (triggered): rollBonus; reaction+cleric-channel-divinity (triggered): rollBonus |
 | Cleric (War Domain) | 3 | War Domain Spells | working | always-prepared spells: 4 |
 | Cleric (War Domain) | 3 | War Priest | working | resource war-priest max 1; bonusAction+war-priest: weaponAttack |
 | Cleric (War Domain) | 6 | War God’s Blessing | working | always-prepared spells: 2 |
 | Cleric (War Domain) | 17 | Avatar of Battle | working | passive: resistance x3 |
 | Druid | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
-| Druid | 1 | Druidic | text-only | out of combat only: skills, tools or languages |
-| Druid | 1 | Primal Order | text-only | needs a choice between the orders at level-up |
-| Druid | 2 | Wild Shape | partial | resource wild-shape max 2; bonusAction+wild-shape: tempHp |
-| Druid | 2 | Wild Companion | partial | always-prepared spells: 1 |
+| Druid | 1 | Druidic | working | passive: languages; always-prepared spells: 1 |
+| Druid | 1 | Primal Order | working | level choice: 2 variants |
+| Druid | 2 | Wild Shape | working | resource wild-shape max 2; bonusAction+wild-shape: polymorph; bonusAction: endOwn |
+| Druid | 2 | Wild Companion | working | always-prepared spells: 1 |
 | Druid | 3 | Druid Subclass | working | level choice: subclass |
 | Druid | 4 | Ability Score Improvement | working | level choice: feat |
 | Druid | 5 | Wild Resurgence | working | resource wild-resurgence-turn max 1; resource wild-resurgence max 1; slot+wild-resurgence-turn: regain; wild-shape+wild-resurgence: regain |
 | Druid | 7 | Elemental Fury | working | level choice: 2 variants |
 | Druid | 15 | Improved Elemental Fury | working | level choice: 2 variants |
-| Druid | 18 | Beast Spells | text-only | no mechanics |
+| Druid | 18 | Beast Spells | working | passive: formSpells |
 | Druid | 19 | Epic Boon | working | level choice: epic boon |
-| Druid | 20 | Archdruid | text-only | no mechanics |
+| Druid | 20 | Archdruid | working | resource wild-shape max 4; wild-shape spent by other features; resource nature-magician max 1; wild-shape+nature-magician: regain; wild-shape+nature-magician: regain; wild-shape+nature-magician: regain; wild-shape+nature-magician: regain |
 | Druid (Circle of the Land) | 3 | Circle of the Land Spells | working | level choice: 4 variants |
-| Druid (Circle of the Land) | 3 | Land’s Aid | text-only | no mechanics |
+| Druid (Circle of the Land) | 3 | Land’s Aid | working | action+wild-shape: save damage |
 | Druid (Circle of the Land) | 6 | Natural Recovery | working | resource natural-recovery-spell max 1; natural-recovery-spell spent by other features; resource natural-recovery max 1; passive: slotRecovery; free casts of another feature's spells |
-| Druid (Circle of the Land) | 10 | Nature’s Ward | text-only | no mechanics |
-| Druid (Circle of the Land) | 14 | Nature’s Sanctuary | text-only | no mechanics |
-| Druid (Circle of the Moon) | 3 | Circle Forms | text-only | no mechanics |
+| Druid (Circle of the Land) | 10 | Nature’s Ward | working | passive: conditionImmunity; level choice: 4 variants |
+| Druid (Circle of the Land) | 14 | Nature’s Sanctuary | working | level choice: 4 variants |
+| Druid (Circle of the Moon) | 3 | Circle Forms | working | bonusAction+wild-shape: polymorph |
 | Druid (Circle of the Moon) | 3 | Circle of the Moon Spells | working | always-prepared spells: 3 |
-| Druid (Circle of the Moon) | 6 | Improved Circle Forms | text-only | no mechanics |
+| Druid (Circle of the Moon) | 6 | Improved Circle Forms | working | passive: weaponRider, bonus |
 | Druid (Circle of the Moon) | 10 | Moonlight Step | working | resource moonlight-step max 1; bonusAction+moonlight-step: teleport, advantage; slot: regain |
-| Druid (Circle of the Moon) | 14 | Lunar Form | text-only | no mechanics |
+| Druid (Circle of the Moon) | 14 | Lunar Form | working | passive: extraDamage, teleportRider |
 | Druid (Circle of the Sea) | 3 | Circle of the Sea Spells | working | always-prepared spells: 5 |
-| Druid (Circle of the Sea) | 3 | Wrath of the Sea | text-only | no mechanics |
-| Druid (Circle of the Sea) | 6 | Aquatic Affinity | text-only | no mechanics |
-| Druid (Circle of the Sea) | 10 | Stormborn | text-only | no mechanics |
+| Druid (Circle of the Sea) | 3 | Wrath of the Sea | working | bonusAction+wild-shape: zone; free: save damage; bonusAction: save damage |
+| Druid (Circle of the Sea) | 6 | Aquatic Affinity | working | passive: movementMode; free: save damage; bonusAction: save damage |
+| Druid (Circle of the Sea) | 10 | Stormborn | working | passive: movementMode, resistance x3 |
 | Druid (Circle of the Sea) | 14 | Oceanic Gift | text-only | no mechanics |
 | Druid (Circle of the Stars) | 3 | Star Map | working | resource star-map max 1; star-map spent by other features; always-prepared spells: 2 |
-| Druid (Circle of the Stars) | 3 | Starry Form | text-only | no mechanics |
-| Druid (Circle of the Stars) | 6 | Cosmic Omen | text-only | no mechanics |
-| Druid (Circle of the Stars) | 10 | Twinkling Constellations | text-only | no mechanics |
-| Druid (Circle of the Stars) | 14 | Full of Stars | text-only | no mechanics |
+| Druid (Circle of the Stars) | 3 | Starry Form | working | passive: castRider x2; bonusAction+wild-shape: attack damage; bonusAction+wild-shape: endOwn, sheds, aspect; bonusAction+wild-shape: endOwn, sheds, aspect, checkFloor x2; bonusAction: attack damage |
+| Druid (Circle of the Stars) | 6 | Cosmic Omen | working | resource cosmic-omen max 1; level choice: 2 variants |
+| Druid (Circle of the Stars) | 10 | Twinkling Constellations | working | passive: movementMode; free: endOwn, sheds, aspect; free: endOwn, sheds, aspect; free: endOwn, sheds, aspect, checkFloor x2 |
+| Druid (Circle of the Stars) | 14 | Full of Stars | working | passive: resistance x3 |
 | Fighter | 1 | Fighting Style | working | level choice: fighting style |
 | Fighter | 1 | Second Wind | working | resource second-wind max 2; bonusAction+second-wind: heal |
 | Fighter | 1 | Weapon Mastery | working | level choice: weapon masteries |
@@ -165,14 +165,14 @@ through the real level-up decisions, and each feature gained is checked against 
 | Fighter | 2 | Tactical Mind | working | passive: checkRescue |
 | Fighter | 3 | Ambush | working | passive: checkRescue, initiativeDie |
 | Fighter | 3 | Bait and Switch | working | superiority-dice: swapPlaces, bonus |
-| Fighter | 3 | Commander’s Strike | text-only | no mechanics |
+| Fighter | 3 | Commander’s Strike | working | passive: attackReplacement; action+superiority-dice: hitDamage, reactionAttack |
 | Fighter | 3 | Fighter Subclass | working | level choice: subclass |
 | Fighter | 4 | Ability Score Improvement | working | level choice: feat |
 | Fighter | 5 | Extra Attack | working | attacks per action: 2 |
 | Fighter | 5 | Tactical Shift | working | passive: activationRider |
 | Fighter | 7 | Commanding Presence | working | passive: checkRescue |
 | Fighter | 7 | Disarming Attack | working | superiority-dice (triggered): save damage, disarm |
-| Fighter | 9 | Indomitable | text-only | no mechanics |
+| Fighter | 9 | Indomitable | working | resource indomitable max 1; indomitable (triggered): reroll, rollBonus |
 | Fighter | 9 | Tactical Master | working | passive: masterySwap |
 | Fighter | 10 | Distracting Strike | working | superiority-dice (triggered): automatic damage, advantage |
 | Fighter | 10 | Evasive Footwork | working | bonusAction+superiority-dice: disengage, bonus |
@@ -195,53 +195,53 @@ through the real level-up decisions, and each feature gained is checked against 
 | Fighter (Champion) | 15 | Superior Critical | working | passive: criticalRange |
 | Fighter (Champion) | 18 | Survivor | working | passive: deathSaveAdvantage, deathSaveRoll, regeneration |
 | Fighter (Eldritch Knight) | 3 | Spellcasting | working | spell slots: 2, spells picked at level-up |
-| Fighter (Eldritch Knight) | 3 | War Bond | text-only | no mechanics |
+| Fighter (Eldritch Knight) | 3 | War Bond | working | passive: warBond |
 | Fighter (Eldritch Knight) | 7 | War Magic | working | passive: attackReplacement |
 | Fighter (Eldritch Knight) | 10 | Eldritch Strike | working | passive: damageRider |
 | Fighter (Eldritch Knight) | 15 | Arcane Charge | working | passive: activationRider |
 | Fighter (Eldritch Knight) | 18 | Improved War Magic | working | passive: attackReplacement |
 | Fighter (Psi Warrior) | 3 | Psionic Power | working | resource psionic-energy-dice max 4; resource psionic-recovery max 1; resource psionic-strike max 1; resource telekinetic-movement max 1; reaction+psionic-energy-dice (triggered): reduceDamage; reaction+psionic-energy-dice (triggered): reduceDamage; psionic-strike+psionic-energy-dice (triggered): automatic damage; bonusAction+psionic-recovery: regain; action+telekinetic-movement: teleport; action+psionic-energy-dice: teleport |
-| Fighter (Psi Warrior) | 7 | Telekinetic Adept | text-only | no mechanics |
-| Fighter (Psi Warrior) | 10 | Guarded Mind | partial | passive: resistance |
-| Fighter (Psi Warrior) | 15 | Bulwark of Force | text-only | no mechanics |
-| Fighter (Psi Warrior) | 18 | Telekinetic Master | partial | bonusAction: weaponAttack; always-prepared spells: 1 |
-| Monk | 1 | Martial Arts | partial | action: attack damage; bonusAction: attack damage |
-| Monk | 1 | Unarmored Defense | partial | passive: acFormula |
+| Fighter (Psi Warrior) | 7 | Telekinetic Adept | working | resource psi-powered-leap max 1; bonusAction+psi-powered-leap: movementMode; psionic-energy-dice: regain; free (triggered): condition prone |
+| Fighter (Psi Warrior) | 10 | Guarded Mind | working | passive: resistance, shakeOff |
+| Fighter (Psi Warrior) | 15 | Bulwark of Force | working | resource bulwark-of-force max 1; bonusAction+bulwark-of-force: halfCover; bonusAction+psionic-energy-dice: halfCover |
+| Fighter (Psi Warrior) | 18 | Telekinetic Master | working | bonusAction: weaponAttack; psionic-energy-dice: regain; always-prepared spells: 1 |
+| Monk | 1 | Martial Arts | working | passive: weaponRider; action: attack damage; bonusAction: attack damage |
+| Monk | 1 | Unarmored Defense | working | passive: acFormula |
 | Monk | 2 | Monk’s Focus | working | resource focus-points max 2; passive: bonusTactics; bonusAction+focus-points: attack damage; bonusAction+focus-points: disengage, dodge; bonusAction+focus-points: disengage, dash |
-| Monk | 2 | Unarmored Movement | partial | passive: bonus |
+| Monk | 2 | Unarmored Movement | working | passive: bonus |
 | Monk | 2 | Uncanny Metabolism | working | resource uncanny-metabolism max 1; resource focus-points max 2; focus-points spent by other features |
-| Monk | 3 | Deflect Attacks | partial | reaction (triggered): reduceDamage |
+| Monk | 3 | Deflect Attacks | working | reaction (triggered): reduceDamage |
 | Monk | 3 | Monk Subclass | working | level choice: subclass |
 | Monk | 4 | Ability Score Improvement | working | level choice: feat |
-| Monk | 4 | Slow Fall | text-only | no falling in fights |
+| Monk | 4 | Slow Fall | working | reaction (triggered): slowFall |
 | Monk | 5 | Extra Attack | working | attacks per action: 2 |
 | Monk | 5 | Stunning Strike | working | focus-points (triggered): condition stunned, actionLimit, advantage |
 | Monk | 6 | Empowered Strikes | working | passive: weaponRider |
-| Monk | 7 | Evasion | text-only | no mechanics |
-| Monk | 9 | Acrobatic Movement | text-only | no mechanics |
-| Monk | 10 | Heightened Focus | partial | bonusAction+focus-points: attack damage; bonusAction+focus-points: tempHp, disengage, dodge; bonusAction+focus-points: disengage, dash |
+| Monk | 7 | Evasion | working | passive: evasion |
+| Monk | 9 | Acrobatic Movement | working | passive: movementMode, waterWalk |
+| Monk | 10 | Heightened Focus | working | bonusAction+focus-points: attack damage; bonusAction+focus-points: tempHp, disengage, dodge; bonusAction+focus-points: disengage, dash; bonusAction+focus-points: carry |
 | Monk | 10 | Self-Restoration | working | passive: shakeOff |
-| Monk | 13 | Deflect Energy | text-only | no mechanics |
-| Monk | 14 | Disciplined Survivor | text-only | no mechanics |
+| Monk | 13 | Deflect Energy | working | reaction (triggered): reduceDamage |
+| Monk | 14 | Disciplined Survivor | working | passive: saveProficiency; focus-points (triggered): reroll |
 | Monk | 15 | Perfect Focus | working | resource focus-points max 15; focus-points spent by other features |
-| Monk | 18 | Superior Defense | text-only | no mechanics |
+| Monk | 18 | Superior Defense | working | focus-points: resistance x12 |
 | Monk | 19 | Epic Boon | working | level choice: epic boon |
-| Monk | 20 | Body and Mind | text-only | no mechanics |
+| Monk | 20 | Body and Mind | working | passive: scoreIncrease |
 | Monk (Warrior of Mercy) | 3 | Hand of Harm | working | focus-points (triggered): automatic damage |
-| Monk (Warrior of Mercy) | 3 | Hand of Healing | partial | action+focus-points: heal |
-| Monk (Warrior of Mercy) | 3 | Implements of Mercy | text-only | no mechanics |
+| Monk (Warrior of Mercy) | 3 | Hand of Healing | working | action+focus-points: heal; bonusAction+focus-points: attack damage; free: heal |
+| Monk (Warrior of Mercy) | 3 | Implements of Mercy | working | passive: skillProficiency, toolProficiency |
 | Monk (Warrior of Mercy) | 6 | Physician’s Touch | working | passive: activationRider x2 |
-| Monk (Warrior of Mercy) | 11 | Flurry of Healing and Harm | partial | resource healing-and-harm max 1; bonusAction+focus-points+healing-and-harm: heal |
+| Monk (Warrior of Mercy) | 11 | Flurry of Healing and Harm | working | resource healing-and-harm max 1; bonusAction+focus-points+healing-and-harm: heal; healing-and-harm (triggered): automatic damage; healing-and-harm (triggered): automatic damage |
 | Monk (Warrior of Mercy) | 17 | Hand of Ultimate Mercy | working | resource hand-of-ultimate-mercy max 1; action+focus-points+hand-of-ultimate-mercy: heal, removeCondition x5 |
-| Monk (Warrior of Shadow) | 3 | Shadow Arts | text-only | no mechanics |
+| Monk (Warrior of Shadow) | 3 | Shadow Arts | working | passive: sense; action+focus-points: zone; always-prepared spells: 1 |
 | Monk (Warrior of Shadow) | 6 | Shadow Step | working | bonusAction: teleport, advantage |
-| Monk (Warrior of Shadow) | 11 | Improved Shadow Step | partial | bonusAction+focus-points: teleport, advantage |
-| Monk (Warrior of Shadow) | 17 | Cloak of Shadows | text-only | no mechanics |
+| Monk (Warrior of Shadow) | 11 | Improved Shadow Step | working | bonusAction+focus-points: teleport, advantage; free: attack damage |
+| Monk (Warrior of Shadow) | 17 | Cloak of Shadows | working | passive: moveThrough; action+focus-points: condition invisible, mark; bonusAction: attack damage |
 | Monk (Warrior of the Elements) | 3 | Elemental Attunement | working | passive: weaponRider; focus-points: mark |
 | Monk (Warrior of the Elements) | 3 | Manipulate Elements | working | always-prepared spells: 1 |
-| Monk (Warrior of the Elements) | 6 | Elemental Burst | text-only | no mechanics |
-| Monk (Warrior of the Elements) | 11 | Stride of the Elements | text-only | no mechanics |
-| Monk (Warrior of the Elements) | 17 | Elemental Epitome | text-only | no mechanics |
+| Monk (Warrior of the Elements) | 6 | Elemental Burst | working | action+focus-points: save damage |
+| Monk (Warrior of the Elements) | 11 | Stride of the Elements | working | passive: movementMode x2 |
+| Monk (Warrior of the Elements) | 17 | Elemental Epitome | working | passive: activationRider, extraDamage; level choice: 5 variants |
 | Monk (Warrior of the Open Hand) | 3 | Open Hand Technique | working | free (triggered): actionLimit; free (triggered): condition prone |
 | Monk (Warrior of the Open Hand) | 6 | Wholeness of Body | working | resource wholeness-of-body max 1; bonusAction+wholeness-of-body: heal |
 | Monk (Warrior of the Open Hand) | 11 | Fleet Step | working | resource fleet-step max 1; fleet-step: dash; fleet-step+focus-points: disengage, dash |
@@ -251,80 +251,80 @@ through the real level-up decisions, and each feature gained is checked against 
 | Paladin | 1 | Weapon Mastery | working | level choice: weapon masteries |
 | Paladin | 2 | Fighting Style | working | level choice: fighting style |
 | Paladin | 2 | Paladin’s Smite | working | always-prepared spells: 1 |
-| Paladin | 3 | Channel Divinity | partial | resource paladin-channel-divinity max 2; paladin-channel-divinity spent by other features |
+| Paladin | 3 | Channel Divinity | working | resource paladin-channel-divinity max 2; paladin-channel-divinity spent by other features; bonusAction+paladin-channel-divinity: sceneAid |
 | Paladin | 3 | Paladin Subclass | working | level choice: subclass |
 | Paladin | 4 | Ability Score Improvement | working | level choice: feat |
 | Paladin | 5 | Extra Attack | working | attacks per action: 2 |
 | Paladin | 5 | Faithful Steed | working | always-prepared spells: 1 |
-| Paladin | 6 | Aura of Protection | partial | passive: bonus |
+| Paladin | 6 | Aura of Protection | working | passive: aura |
 | Paladin | 9 | Abjure Foes | working | action+paladin-channel-divinity: condition frightened, actionLimit |
-| Paladin | 10 | Aura of Courage | text-only | no mechanics |
+| Paladin | 10 | Aura of Courage | working | passive: aura |
 | Paladin | 11 | Radiant Strikes | working | passive: extraDamage |
 | Paladin | 14 | Restoring Touch | working | bonusAction: cure |
 | Paladin | 18 | Aura Expansion | text-only | no mechanics |
 | Paladin | 19 | Epic Boon | working | level choice: epic boon |
 | Paladin (Oath of Devotion) | 3 | Oath of Devotion Spells | working | always-prepared spells: 2 |
 | Paladin (Oath of Devotion) | 3 | Sacred Weapon | working | passive: weaponRider; paladin-channel-divinity: zone |
-| Paladin (Oath of Devotion) | 7 | Aura of Devotion | text-only | no mechanics |
-| Paladin (Oath of Devotion) | 15 | Smite of Protection | text-only | no mechanics |
-| Paladin (Oath of Devotion) | 20 | Holy Nimbus | text-only | no mechanics |
-| Paladin (Oath of Glory) | 3 | Inspiring Smite | text-only | no mechanics |
+| Paladin (Oath of Devotion) | 7 | Aura of Devotion | working | passive: aura |
+| Paladin (Oath of Devotion) | 15 | Smite of Protection | working | passive: castRider, aura |
+| Paladin (Oath of Devotion) | 20 | Holy Nimbus | working | resource holy-nimbus max 1; passive: aura; bonusAction+holy-nimbus: aspect; bonusAction+slot: aspect; passive while active: saveAdvantage |
+| Paladin (Oath of Glory) | 3 | Inspiring Smite | working | passive: castRider |
 | Paladin (Oath of Glory) | 3 | Oath of Glory Spells | working | always-prepared spells: 2 |
 | Paladin (Oath of Glory) | 3 | Peerless Athlete | partial | bonusAction+paladin-channel-divinity: advantage |
-| Paladin (Oath of Glory) | 7 | Aura of Alacrity | text-only | no mechanics |
-| Paladin (Oath of Glory) | 15 | Glorious Defense | text-only | no mechanics |
-| Paladin (Oath of Glory) | 20 | Living Legend | text-only | no mechanics |
+| Paladin (Oath of Glory) | 7 | Aura of Alacrity | working | passive: bonus, aura |
+| Paladin (Oath of Glory) | 15 | Glorious Defense | working | resource glorious-defense max 1; reaction+glorious-defense (triggered): acAgainstHit, strike; reaction+glorious-defense (triggered): acAgainstHit, strike |
+| Paladin (Oath of Glory) | 20 | Living Legend | working | resource living-legend max 1; bonusAction+living-legend: advantage; bonusAction+slot: advantage; reaction (triggered): reroll; free (triggered): succeed |
 | Paladin (Oath of the Ancients) | 3 | Nature’s Wrath | working | action+paladin-channel-divinity: condition restrained |
 | Paladin (Oath of the Ancients) | 3 | Oath of the Ancients Spells | working | always-prepared spells: 2 |
-| Paladin (Oath of the Ancients) | 7 | Aura of Warding | partial | passive: resistance x3 |
+| Paladin (Oath of the Ancients) | 7 | Aura of Warding | working | passive: aura |
 | Paladin (Oath of the Ancients) | 15 | Undying Sentinel | working | resource undying-sentinel max 1; passive: dropToOne |
-| Paladin (Oath of the Ancients) | 20 | Elder Champion | text-only | no mechanics |
+| Paladin (Oath of the Ancients) | 20 | Elder Champion | working | resource elder-champion max 1; passive: aura; bonusAction+elder-champion: aspect; bonusAction+slot: aspect; passive while active: regeneration, castsAs |
 | Paladin (Oath of Vengeance) | 3 | Oath of Vengeance Spells | working | always-prepared spells: 2 |
 | Paladin (Oath of Vengeance) | 3 | Vow of Enmity | working | paladin-channel-divinity: advantage |
-| Paladin (Oath of Vengeance) | 7 | Relentless Avenger | partial | passive: damageRider |
-| Paladin (Oath of Vengeance) | 15 | Soul of Vengeance | text-only | no mechanics |
-| Paladin (Oath of Vengeance) | 20 | Avenging Angel | text-only | no mechanics |
+| Paladin (Oath of Vengeance) | 7 | Relentless Avenger | working | passive: damageRider |
+| Paladin (Oath of Vengeance) | 15 | Soul of Vengeance | working | reaction (triggered): strike |
+| Paladin (Oath of Vengeance) | 20 | Avenging Angel | working | resource avenging-angel max 1; passive: aura; bonusAction+avenging-angel: movementMode; bonusAction+slot: movementMode |
 | Ranger | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
-| Ranger | 1 | Favored Enemy | partial | resource favored-enemy max 2; bonusAction+favored-enemy: hitDamage; always-prepared spells: 1 |
+| Ranger | 1 | Favored Enemy | working | resource favored-enemy max 2; favored-enemy spent by other features; always-prepared spells: 2 |
 | Ranger | 1 | Weapon Mastery | working | level choice: weapon masteries |
-| Ranger | 2 | Deft Explorer | text-only | out of combat only: skills, tools or languages |
+| Ranger | 2 | Deft Explorer | text-only | no mechanics |
 | Ranger | 2 | Fighting Style | working | level choice: fighting style |
 | Ranger | 3 | Ranger Subclass | working | level choice: subclass |
 | Ranger | 4 | Ability Score Improvement | working | level choice: feat |
 | Ranger | 5 | Extra Attack | working | attacks per action: 2 |
-| Ranger | 6 | Roving | text-only | no mechanics |
+| Ranger | 6 | Roving | working | passive: bonus, movementMode x2 |
 | Ranger | 9 | Expertise | text-only | no mechanics |
 | Ranger | 10 | Tireless | working | resource tireless max 1; passive: restExhaustion; action+tireless: tempHp |
-| Ranger | 13 | Relentless Hunter | text-only | no mechanics |
+| Ranger | 13 | Relentless Hunter | working | passive: unshakableFocus |
 | Ranger | 14 | Nature’s Veil | working | resource natures-veil max 1; bonusAction+natures-veil: condition invisible |
 | Ranger | 17 | Precise Hunter | working | passive: attackAdvantage |
-| Ranger | 18 | Feral Senses | text-only | no mechanics |
+| Ranger | 18 | Feral Senses | working | passive: sense |
 | Ranger | 19 | Epic Boon | working | level choice: epic boon |
 | Ranger | 20 | Foe Slayer | text-only | no mechanics |
-| Ranger (Beast Master) | 3 | Primal Companion | text-only | no mechanics |
+| Ranger (Beast Master) | 3 | Primal Companion | working | passive: attackReplacement; bonusAction: commandCompanion; action: commandCompanion; level choice: 3 variants |
 | Ranger (Beast Master) | 7 | Exceptional Training | text-only | no mechanics |
 | Ranger (Beast Master) | 11 | Bestial Fury | text-only | no mechanics |
-| Ranger (Beast Master) | 15 | Share Spells | text-only | no mechanics |
+| Ranger (Beast Master) | 15 | Share Spells | working | passive: shareSpells |
 | Ranger (Fey Wanderer) | 3 | Dreadful Strikes | working | passive: extraDamage |
 | Ranger (Fey Wanderer) | 3 | Fey Wanderer Spells | working | always-prepared spells: 1 |
 | Ranger (Fey Wanderer) | 3 | Otherworldly Glamour | working | passive: bonus |
-| Ranger (Fey Wanderer) | 7 | Beguiling Twist | text-only | no mechanics |
-| Ranger (Fey Wanderer) | 11 | Fey Reinforcements | text-only | no mechanics |
-| Ranger (Fey Wanderer) | 15 | Misty Wanderer | partial | resource misty-wanderer max 1; misty-wanderer spent by other features; always-prepared spells: 1 |
+| Ranger (Fey Wanderer) | 7 | Beguiling Twist | working | passive: saveAdvantage; reaction (triggered): condition charmed, condition frightened |
+| Ranger (Fey Wanderer) | 11 | Fey Reinforcements | working | always-prepared spells: 1 |
+| Ranger (Fey Wanderer) | 15 | Misty Wanderer | working | resource misty-wanderer max 1; misty-wanderer spent by other features; passive: teleportRider; always-prepared spells: 1 |
 | Ranger (Gloom Stalker) | 3 | Dread Ambusher | working | resource dreadful-strike max 1; passive: bonus, firstTurnSpeed; dreadful-strike (triggered): automatic damage |
 | Ranger (Gloom Stalker) | 3 | Gloom Stalker Spells | working | always-prepared spells: 1 |
-| Ranger (Gloom Stalker) | 3 | Umbral Sight | text-only | no mechanics |
-| Ranger (Gloom Stalker) | 7 | Iron Mind | text-only | no mechanics |
+| Ranger (Gloom Stalker) | 3 | Umbral Sight | working | passive: sense, umbral |
+| Ranger (Gloom Stalker) | 7 | Iron Mind | working | passive: saveProficiency |
 | Ranger (Gloom Stalker) | 11 | Stalker’s Flurry | working | free (triggered): weaponAttack; free (triggered): condition frightened |
-| Ranger (Gloom Stalker) | 15 | Shadowy Dodge | text-only | no mechanics |
+| Ranger (Gloom Stalker) | 15 | Shadowy Dodge | working | reaction (triggered): reactionMove |
 | Ranger (Hunter) | 3 | Hunter’s Lore | text-only | no mechanics |
 | Ranger (Hunter) | 3 | Hunter’s Prey | partial | level choice: 2 variants |
-| Ranger (Hunter) | 7 | Defensive Tactics | text-only | no mechanics |
+| Ranger (Hunter) | 7 | Defensive Tactics | working | level choice: 2 variants |
 | Ranger (Hunter) | 11 | Superior Hunter’s Prey | working | free (triggered): automatic damage |
-| Ranger (Hunter) | 15 | Superior Hunter’s Defense | text-only | no mechanics |
-| Rogue | 1 | Expertise | text-only | out of combat only: skills, tools or languages |
+| Ranger (Hunter) | 15 | Superior Hunter’s Defense | working | reaction (triggered): resistTrigger |
+| Rogue | 1 | Expertise | text-only | no mechanics |
 | Rogue | 1 | Sneak Attack | working | passive: extraDamage |
-| Rogue | 1 | Thieves’ Cant | text-only | out of combat only: skills, tools or languages |
+| Rogue | 1 | Thieves’ Cant | working | passive: languages |
 | Rogue | 1 | Weapon Mastery | working | level choice: weapon masteries |
 | Rogue | 2 | Cunning Action | working | passive: bonusTactics |
 | Rogue | 3 | Rogue Subclass | working | level choice: subclass |
@@ -332,34 +332,34 @@ through the real level-up decisions, and each feature gained is checked against 
 | Rogue | 4 | Ability Score Improvement | working | level choice: feat |
 | Rogue | 5 | Cunning Strike | working | free (triggered): condition poisoned; free (triggered): condition prone |
 | Rogue | 5 | Uncanny Dodge | working | reaction (triggered): reduceDamage |
-| Rogue | 7 | Evasion | text-only | no mechanics |
+| Rogue | 7 | Evasion | working | passive: evasion |
 | Rogue | 7 | Reliable Talent | working | passive: checkFloor |
 | Rogue | 11 | Improved Cunning Strike | working | passive: strikeEffects |
 | Rogue | 14 | Devious Strikes | working | free (triggered): actionLimit; free (triggered): condition unconscious; free (triggered): condition blinded |
-| Rogue | 15 | Slippery Mind | text-only | no mechanics |
-| Rogue | 18 | Elusive | text-only | no mechanics |
+| Rogue | 15 | Slippery Mind | working | passive: saveProficiency |
+| Rogue | 18 | Elusive | working | passive: noAdvantageAgainst |
 | Rogue | 19 | Epic Boon | working | level choice: epic boon |
-| Rogue | 20 | Stroke of Luck | text-only | no mechanics |
+| Rogue | 20 | Stroke of Luck | working | resource stroke-of-luck max 1; stroke-of-luck (triggered): replaceRoll |
 | Rogue (Arcane Trickster) | 3 | Spellcasting | working | spell slots: 2, spells picked at level-up |
 | Rogue (Arcane Trickster) | 3 | Mage Hand Legerdemain | text-only | no mechanics |
 | Rogue (Arcane Trickster) | 9 | Magical Ambush | working | passive: magicalAmbush |
 | Rogue (Arcane Trickster) | 13 | Versatile Trickster | partial | passive: alsoStrikes |
-| Rogue (Arcane Trickster) | 17 | Spell Thief | text-only | no mechanics |
+| Rogue (Arcane Trickster) | 17 | Spell Thief | working | resource spell-thief max 1; reaction+spell-thief (triggered): stealSpell |
 | Rogue (Assassin) | 3 | Assassinate | working | passive: initiativeAdvantage, attackAdvantage, extraDamage |
-| Rogue (Assassin) | 3 | Assassin’s Tools | text-only | no mechanics |
-| Rogue (Assassin) | 9 | Infiltration Expertise | text-only | no mechanics |
+| Rogue (Assassin) | 3 | Assassin’s Tools | working | passive: toolProficiency |
+| Rogue (Assassin) | 9 | Infiltration Expertise | working | bonusAction: advantage |
 | Rogue (Assassin) | 13 | Envenom Weapons | working | passive: overcomeResistance; free (triggered): save damage, condition poisoned, lingeringDamage |
 | Rogue (Assassin) | 17 | Death Strike | working | passive: deathStrike |
 | Rogue (Soulknife) | 3 | Psionic Power | working | resource psionic-energy-dice max 4; resource psionic-recovery max 1; passive: checkRescue; bonusAction+psionic-recovery: regain |
 | Rogue (Soulknife) | 3 | Psychic Blades | partial | action: attack damage; bonusAction: attack damage |
 | Rogue (Soulknife) | 9 | Soul Blades | working | passive: missBoost; bonusAction+psionic-energy-dice: teleport |
-| Rogue (Soulknife) | 13 | Psychic Veil | text-only | no mechanics |
+| Rogue (Soulknife) | 13 | Psychic Veil | working | resource psychic-veil max 1; action+psychic-veil: condition invisible; psionic-energy-dice: regain |
 | Rogue (Soulknife) | 17 | Rend Mind | working | resource rend-mind max 1; rend-mind (triggered): condition stunned; psionic-energy-dice (triggered): condition stunned |
 | Rogue (Thief) | 3 | Fast Hands | working | passive: fastHands |
 | Rogue (Thief) | 3 | Second-Story Work | working | passive: movementMode, jump |
 | Rogue (Thief) | 9 | Supreme Sneak | text-only | no mechanics |
-| Rogue (Thief) | 13 | Use Magic Device | text-only | no mechanics |
-| Rogue (Thief) | 17 | Thief’s Reflexes | text-only | no mechanics |
+| Rogue (Thief) | 13 | Use Magic Device | working | passive: attunementSlots, chargeSaver, anyScroll |
+| Rogue (Thief) | 17 | Thief’s Reflexes | working | passive: secondTurn |
 | Sorcerer | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
 | Sorcerer | 1 | Innate Sorcery | working | resource innate-sorcery max 2; bonusAction+innate-sorcery: advantage, bonus |
 | Sorcerer | 2 | Careful Spell | working | Metamagic option (metamagic.ts) |
@@ -379,47 +379,47 @@ through the real level-up decisions, and each feature gained is checked against 
 | Sorcerer (Aberrant Sorcery) | 3 | Psionic Spells | working | always-prepared spells: 5 |
 | Sorcerer (Aberrant Sorcery) | 3 | Telepathic Speech | text-only | no mechanics |
 | Sorcerer (Aberrant Sorcery) | 6 | Psionic Sorcery | working | passive: silentCasting; free casts of another feature's spells |
-| Sorcerer (Aberrant Sorcery) | 6 | Psychic Defenses | partial | passive: resistance |
-| Sorcerer (Aberrant Sorcery) | 14 | Revelation in Flesh | text-only | no mechanics |
-| Sorcerer (Aberrant Sorcery) | 18 | Warping Implosion | partial | resource warping-implosion max 1; action+warping-implosion: teleport; sorcery-points: regain |
+| Sorcerer (Aberrant Sorcery) | 6 | Psychic Defenses | working | passive: resistance, saveAdvantage |
+| Sorcerer (Aberrant Sorcery) | 14 | Revelation in Flesh | working | passive: moveThrough; bonusAction+sorcery-points: movementMode, waterBreathing; bonusAction+sorcery-points: movementMode; bonusAction+sorcery-points: seeInvisible; bonusAction+sorcery-points: aspect; sorcery-points: movementMode, waterBreathing; sorcery-points: movementMode; sorcery-points: seeInvisible; sorcery-points: aspect |
+| Sorcerer (Aberrant Sorcery) | 18 | Warping Implosion | working | resource warping-implosion max 1; action+warping-implosion: teleport; sorcery-points: regain |
 | Sorcerer (Clockwork Sorcery) | 3 | Clockwork Spells | working | always-prepared spells: 4 |
-| Sorcerer (Clockwork Sorcery) | 3 | Restore Balance | text-only | no mechanics |
-| Sorcerer (Clockwork Sorcery) | 6 | Bastion of Law | text-only | no mechanics |
-| Sorcerer (Clockwork Sorcery) | 14 | Trance of Order | text-only | no mechanics |
+| Sorcerer (Clockwork Sorcery) | 3 | Restore Balance | working | resource restore-balance max 1; reaction+restore-balance (triggered): reroll |
+| Sorcerer (Clockwork Sorcery) | 6 | Bastion of Law | working | action+sorcery-points: wardDice; action+sorcery-points: wardDice; action+sorcery-points: wardDice; action+sorcery-points: wardDice; action+sorcery-points: wardDice |
+| Sorcerer (Clockwork Sorcery) | 14 | Trance of Order | working | resource trance-of-order max 1; bonusAction+trance-of-order: noAdvantageAgainst, checkFloor; bonusAction+sorcery-points: noAdvantageAgainst, checkFloor |
 | Sorcerer (Clockwork Sorcery) | 18 | Clockwork Cavalcade | working | resource clockwork-cavalcade max 1; action+clockwork-cavalcade: heal, dispel; action+sorcery-points: heal, dispel |
 | Sorcerer (Draconic Sorcery) | 3 | Draconic Resilience | working | passive: acFormula, bonus |
 | Sorcerer (Draconic Sorcery) | 3 | Draconic Spells | working | always-prepared spells: 4 |
 | Sorcerer (Draconic Sorcery) | 6 | Elemental Affinity | working | level choice: 5 variants |
-| Sorcerer (Draconic Sorcery) | 14 | Dragon Wings | text-only | no mechanics |
-| Sorcerer (Draconic Sorcery) | 18 | Dragon Companion | text-only | no mechanics |
-| Sorcerer (Wild Magic Sorcery) | 3 | Wild Magic Surge | text-only | no mechanics |
-| Sorcerer (Wild Magic Sorcery) | 3 | Tides of Chaos | text-only | no mechanics |
-| Sorcerer (Wild Magic Sorcery) | 6 | Bend Luck | text-only | no mechanics |
-| Sorcerer (Wild Magic Sorcery) | 14 | Controlled Chaos | text-only | no mechanics |
-| Sorcerer (Wild Magic Sorcery) | 18 | Tamed Surge | text-only | no mechanics |
+| Sorcerer (Draconic Sorcery) | 14 | Dragon Wings | working | resource dragon-wings max 1; bonusAction+dragon-wings: movementMode; sorcery-points: regain |
+| Sorcerer (Draconic Sorcery) | 18 | Dragon Companion | working | always-prepared spells: 1 |
+| Sorcerer (Wild Magic Sorcery) | 3 | Wild Magic Surge | working | passive: castRider |
+| Sorcerer (Wild Magic Sorcery) | 3 | Tides of Chaos | working | resource tides-of-chaos max 1; passive: castRider; tides-of-chaos: advantage |
+| Sorcerer (Wild Magic Sorcery) | 6 | Bend Luck | working | reaction+sorcery-points (triggered): rollBonus |
+| Sorcerer (Wild Magic Sorcery) | 14 | Controlled Chaos | working | passive: tableTwice |
+| Sorcerer (Wild Magic Sorcery) | 18 | Tamed Surge | working | resource tamed-surge max 1; passive: castRider |
 | Warlock | 1 | Armor of Shadows | working | passive: acFormula |
 | Warlock | 1 | Eldritch Invocations | working | level choice: options, each with its own mechanics |
 | Warlock | 1 | Pact Magic | working | spell slots: 1, spells picked at level-up |
 | Warlock | 2 | Agonizing Blast | working | passive: cantripRider |
-| Warlock | 2 | Devil’s Sight | partial | passive: seesInDarkness |
+| Warlock | 2 | Devil’s Sight | working | passive: seesInDarkness |
 | Warlock | 2 | Magical Cunning | working | resource magical-cunning max 1; magical-cunning: regain |
 | Warlock | 3 | Warlock Subclass | working | level choice: subclass |
 | Warlock | 4 | Ability Score Improvement | working | level choice: feat |
-| Warlock | 5 | Ascendant Step | text-only | no mechanics |
+| Warlock | 5 | Ascendant Step | working | always-prepared spells: 1 |
 | Warlock | 5 | Eldritch Mind | working | passive: concentrationAdvantage |
 | Warlock | 7 | Eldritch Spear | working | passive: cantripRider |
 | Warlock | 9 | Fiendish Vigor | working | action: tempHp |
-| Warlock | 9 | Contact Patron | text-only | no mechanics |
+| Warlock | 9 | Contact Patron | working | always-prepared spells: 1 |
 | Warlock | 11 | Mystic Arcanum | working | level choice: spells |
 | Warlock | 12 | Gaze of Two Minds | text-only | no mechanics |
-| Warlock | 15 | Gift of the Depths | text-only | no mechanics |
+| Warlock | 15 | Gift of the Depths | working | passive: waterBreathing, movementMode; always-prepared spells: 1 |
 | Warlock | 18 | Lessons of the First Ones | text-only | no mechanics |
 | Warlock | 19 | Epic Boon | working | level choice: epic boon |
 | Warlock | 20 | Eldritch Master | working | magical-cunning: regain |
 | Warlock (Archfey Patron) | 3 | Archfey Spells | working | always-prepared spells: 5 |
-| Warlock (Archfey Patron) | 3 | Steps of the Fey | partial | resource steps-of-the-fey max 1; steps-of-the-fey spent by other features; always-prepared spells: 1 |
-| Warlock (Archfey Patron) | 6 | Misty Escape | text-only | no mechanics |
-| Warlock (Archfey Patron) | 10 | Beguiling Defenses | text-only | no mechanics |
+| Warlock (Archfey Patron) | 3 | Steps of the Fey | working | resource steps-of-the-fey max 1; steps-of-the-fey spent by other features; passive: castRider; always-prepared spells: 1 |
+| Warlock (Archfey Patron) | 6 | Misty Escape | working | reaction+steps-of-the-fey (triggered): teleport; reaction+slot (triggered): teleport; bonusAction+steps-of-the-fey: teleport, condition invisible; bonusAction+steps-of-the-fey: teleport |
+| Warlock (Archfey Patron) | 10 | Beguiling Defenses | working | resource beguiling-defenses max 1; passive: conditionImmunity; reaction+beguiling-defenses (triggered): save damage; reaction+slot (triggered): save damage |
 | Warlock (Archfey Patron) | 14 | Bewitching Magic | working | passive: castRider |
 | Warlock (Celestial Patron) | 3 | Celestial Spells | working | always-prepared spells: 6 |
 | Warlock (Celestial Patron) | 3 | Healing Light | working | resource healing-light max 4; bonusAction: heal |
@@ -428,43 +428,43 @@ through the real level-up decisions, and each feature gained is checked against 
 | Warlock (Celestial Patron) | 14 | Searing Vengeance | working | resource searing-vengeance max 1; passive: deathSaveRescue |
 | Warlock (Fiend Patron) | 3 | Dark One’s Blessing | working | passive: onKill |
 | Warlock (Fiend Patron) | 3 | Fiend Spells | working | always-prepared spells: 4 |
-| Warlock (Fiend Patron) | 6 | Dark One’s Own Luck | text-only | no mechanics |
-| Warlock (Fiend Patron) | 10 | Fiendish Resilience | text-only | no mechanics |
+| Warlock (Fiend Patron) | 6 | Dark One’s Own Luck | working | resource dark-ones-own-luck max 1; dark-ones-own-luck (triggered): rollBonus |
+| Warlock (Fiend Patron) | 10 | Fiendish Resilience | working | level choice: 12 variants |
 | Warlock (Fiend Patron) | 14 | Hurl Through Hell | working | resource hurl-through-hell max 1; hurl-through-hell (triggered): save damage, condition incapacitated, sealed; slot (triggered): save damage, condition incapacitated, sealed |
 | Warlock (Great Old One Patron) | 3 | Awakened Mind | text-only | no mechanics |
 | Warlock (Great Old One Patron) | 3 | Great Old One Spells | working | always-prepared spells: 4 |
 | Warlock (Great Old One Patron) | 3 | Psychic Spells | working | passive: spellTypes, silentCasting |
-| Warlock (Great Old One Patron) | 6 | Clairvoyant Combatant | text-only | no mechanics |
-| Warlock (Great Old One Patron) | 10 | Eldritch Hex | text-only | no mechanics |
-| Warlock (Great Old One Patron) | 10 | Thought Shield | partial | passive: resistance |
-| Warlock (Great Old One Patron) | 14 | Create Thrall | text-only | no mechanics |
+| Warlock (Great Old One Patron) | 6 | Clairvoyant Combatant | working | resource clairvoyant-combatant max 1; bonusAction+clairvoyant-combatant: disadvantage, advantage; slot: regain |
+| Warlock (Great Old One Patron) | 10 | Eldritch Hex | working | always-prepared spells: 1 |
+| Warlock (Great Old One Patron) | 10 | Thought Shield | working | passive: resistance, mirrorDamage |
+| Warlock (Great Old One Patron) | 14 | Create Thrall | working | passive: summonBoost |
 | Wizard | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
 | Wizard | 1 | Ritual Adept | working | passive: ritualAdept |
 | Wizard | 1 | Arcane Recovery | working | resource arcane-recovery max 1; passive: slotRecovery |
-| Wizard | 2 | Scholar | text-only | out of combat only: skills, tools or languages |
+| Wizard | 2 | Scholar | text-only | no mechanics |
 | Wizard | 3 | Wizard Subclass | working | level choice: subclass |
 | Wizard | 4 | Ability Score Improvement | working | level choice: feat |
-| Wizard | 5 | Memorize Spell | text-only | needs prepared spells swapped on a Short Rest |
+| Wizard | 5 | Memorize Spell | working | passive: memorize |
 | Wizard | 18 | Spell Mastery | text-only | no mechanics |
 | Wizard | 19 | Epic Boon | working | level choice: epic boon |
 | Wizard | 20 | Signature Spells | text-only | no mechanics |
 | Wizard (Abjurer) | 3 | Abjuration Savant | text-only | no mechanics |
-| Wizard (Abjurer) | 3 | Arcane Ward | text-only | no mechanics |
-| Wizard (Abjurer) | 6 | Projected Ward | text-only | no mechanics |
+| Wizard (Abjurer) | 3 | Arcane Ward | working | resource arcane-ward max 8; resource arcane-ward-made max 1; passive: wardPool, castRider x2; bonusAction+slot: regain |
+| Wizard (Abjurer) | 6 | Projected Ward | working | reaction (triggered): reduceDamage |
 | Wizard (Abjurer) | 10 | Spell Breaker | working | passive: spellBreaker, castsAs; always-prepared spells: 2 |
-| Wizard (Abjurer) | 14 | Spell Resistance | partial | passive: magicResistance |
+| Wizard (Abjurer) | 14 | Spell Resistance | working | passive: magicResistance, spellDamageResistance |
 | Wizard (Diviner) | 3 | Divination Savant | text-only | no mechanics |
-| Wizard (Diviner) | 3 | Portent | text-only | no mechanics |
+| Wizard (Diviner) | 3 | Portent | working | passive: foretell; free (triggered): replaceRoll |
 | Wizard (Diviner) | 6 | Expert Divination | working | passive: schoolCast |
-| Wizard (Diviner) | 10 | The Third Eye | text-only | no mechanics |
-| Wizard (Diviner) | 14 | Greater Portent | text-only | no mechanics |
+| Wizard (Diviner) | 10 | The Third Eye | working | resource the-third-eye max 1; bonusAction+the-third-eye: sense; bonusAction+the-third-eye: seeInvisible; bonusAction+the-third-eye: comprehension |
+| Wizard (Diviner) | 14 | Greater Portent | working | passive: foretell |
 | Wizard (Evoker) | 3 | Evocation Savant | text-only | no mechanics |
 | Wizard (Evoker) | 3 | Potent Cantrip | working | passive: potentCantrip |
 | Wizard (Evoker) | 6 | Sculpt Spells | working | passive: sculptor |
 | Wizard (Evoker) | 10 | Empowered Evocation | working | passive: spellDamage |
 | Wizard (Evoker) | 14 | Overchannel | working | resource overchannel max 20; passive: castOption |
 | Wizard (Illusionist) | 3 | Illusion Savant | text-only | no mechanics |
-| Wizard (Illusionist) | 3 | Improved Illusions | text-only | no mechanics |
-| Wizard (Illusionist) | 6 | Phantasmal Creatures | text-only | no mechanics |
-| Wizard (Illusionist) | 10 | Illusory Self | text-only | no mechanics |
-| Wizard (Illusionist) | 14 | Illusory Reality | text-only | no mechanics |
+| Wizard (Illusionist) | 3 | Improved Illusions | working | passive: noComponents; always-prepared spells: 1 |
+| Wizard (Illusionist) | 6 | Phantasmal Creatures | working | always-prepared spells: 2 |
+| Wizard (Illusionist) | 10 | Illusory Self | working | resource illusory-self max 1; reaction+illusory-self (triggered): negateHit; reaction+slot (triggered): negateHit |
+| Wizard (Illusionist) | 14 | Illusory Reality | working | bonusAction: realImage |

@@ -638,8 +638,8 @@ describe("surprise", () => {
     expect(plain.d20s()).toBe(3);
     const enemies = counting();
     const started = startCombat(
-      { ...encounter, surprise: "enemies" as const },
-      contextOf(run, party, enemies.dice),
+      encounter,
+      contextOf(run, { ...party, surprise: "enemies" }, enemies.dice),
       { canFlee: false, defeatContinues: false },
     );
     expect(enemies.d20s()).toBe(5);

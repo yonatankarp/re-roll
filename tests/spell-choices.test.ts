@@ -397,9 +397,9 @@ describe("a weapon attack made or changed by a spell", () => {
       deriveStats(hero, run),
       deriveStats(hero, run).spellAbility ?? "int",
     );
-    // The highest rolls are a Critical Hit: a longsword's d8 and the fifth level's extra d6 doubled, and the caster's
-    // modifier.
-    expect(damageOf(cast.events, "a")).toEqual([16 + mod + 12]);
+    // The highest rolls are a Critical Hit: a longsword's d10 (two-handed, no Shield) and the fifth level's extra d6
+    // doubled, and the caster's modifier.
+    expect(damageOf(cast.events, "a")).toEqual([20 + mod + 12]);
     expect(typesOf(cast.events, "a")).toEqual(["radiant"]);
     // It was for that attack only.
     expect(

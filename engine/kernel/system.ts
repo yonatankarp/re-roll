@@ -421,6 +421,9 @@ export interface SystemDefinition<S> {
   readonly precedence?: (plugin: PluginManifest) => number;
   // The edition a plugin follows, when the system reads an unset one as something else. Unset: the manifest's.
   readonly edition?: (plugin: PluginManifest) => string;
+  // What check-pack reports about an entry that loads but would play wrong, as a rule placed where nothing reads it.
+  // Only check-pack asks, so it never stops a game loading.
+  readonly lint?: (entry: ContentEntry) => readonly string[];
   // A book section's kind from the system's own wording, such as "monster" for a stat block, for the import library.
   readonly libraryKind?: (body: string) => string | null;
   readonly htmlParsers?: Readonly<

@@ -9,6 +9,7 @@ import {
   LEVELED_CAST,
   MAGIC_ACTION,
   SLOT_CAST_ACTION,
+  SLOT_SPENT,
   controllingRider,
   dndEvent,
   type DndState,
@@ -61,7 +62,7 @@ import {
   throughOf,
   walksOnWater,
 } from "../movement-modes.ts";
-import { behindTotalCover, difficultSquares } from "../sight.ts";
+import { behindTotalCover, difficultSquares, fearSources } from "../sight.ts";
 import {
   encodeOption,
   spellOfSource,
@@ -632,12 +633,24 @@ export function moveSquares(
     }
     return best;
   };
-  const plain = search(1);
+  // Prone and not standing, it crawls: each foot costs 1 extra foot.
+  // shortcut: crawling doubles a difficult square's cost rather than adding 1 foot to it.
+  const crawl = hasCondition(actor, "prone") ? 1 : 0;
+  const plain = search(1 + crawl);
   const holds = heldBy(actor, state, access).filter(
     ({ held }) => !isDead(held),
   );
-  // Compelled Duel keeps its target within reach of the caster.
-  const tooFar = leashed(actor, state);
+  // Compelled Duel keeps its target within reach of the caster, and a Frightened creature can't move closer to the
+  // source of its fear.
+  // shortcut: only the square it ends on is measured, not each one on the way.
+  const leash = leashed(actor, state);
+  const fears = fearSources(actor, state);
+  const tooFar = (square: Square): boolean =>
+    leash(square) ||
+    fears.some(
+      ({ position }) =>
+        distanceFeet(square, position) < distanceFeet(from, position),
+    );
   if (holds.length === 0) {
     return [...plain.values()].filter(({ square }) => !tooFar(square));
   }
@@ -647,7 +660,9 @@ export function moveSquares(
     return size === 0 || own - size >= 2;
   };
   const dragging =
-    hasPassive(stats, "abduct") || holds.every(light) ? plain : search(2);
+    hasPassive(stats, "abduct") || holds.every(light)
+      ? plain
+      : search(2 + crawl);
   return [...plain.values()]
     .map((walk) => {
       const near = holds.every(
@@ -883,6 +898,12 @@ export function quickenedBars(action: KnownAction, actor: Actor): boolean {
   );
 }
 
+// An Action or a Bonus Action, which only its user's own turn has.
+export const onOwnTurn = (action: KnownAction): boolean =>
+  action.activation.cost.some(
+    (cost) => cost === "action" || cost === "bonusAction",
+  );
+
 export function canAfford(
   action: KnownAction,
   actor: Actor,
@@ -949,7 +970,14 @@ export function canAfford(
       if (cost === "action") return actor.budget.action;
       if (cost === "bonusAction") return actor.budget.bonusAction;
       if (cost === "reaction") return actor.budget.reaction;
-      if (cost === "slot") return slotToSpend(action, actor, stats) !== null;
+      // One spell slot a turn. shortcut: only between an Action and a Bonus Action, which share their user's own turn;
+      // a reaction's slot on that turn isn't counted, since a reaction off it would need the turn's identity here.
+      if (cost === "slot") {
+        return (
+          slotToSpend(action, actor, stats) !== null &&
+          !(onOwnTurn(action) && used.includes(SLOT_SPENT))
+        );
+      }
       if ("gold" in cost) return true; // the party's purse is checked where it's offered (goldFor)
       return (
         (actor.resourcesSpent[cost.resource] ?? 0) + (cost.count ?? 1) <=

@@ -10,6 +10,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
   - Then run CI on the branch with `gh workflow run ci.yml --ref <branch>`. A branch push alone doesn't start CI.
   - Merge into `main` only when that run passes. Watch it with `gh run list --branch <branch>`.
 - The pre-commit hook runs `npm run typecheck` (four tsc projects) and `npm run lint`.
+- Book-gated tests (every `*-books.test.ts`, the phb half of `tests/class-features.test.ts`, and the book parts of others) skip without `books/`, so public CI never runs them. `npm run test:books` runs the unit suite with `books/` loaded and fails if it's missing. It runs locally only, never in GitHub Actions: the private books repo's Actions minutes are too few, and a self-hosted runner is not allowed. A session that changes engine, plugin or test code runs it before merging and records the counts in its merge commit, for example `test:books: 176 passed, 0 failed`. That line is the last visible result.
 - `npm run check-pack` and the balance sims need `books/`, which CI can't see, so run them locally. Before starting a sim, check that total CPU is under 700% (`ps -A -o %cpu | awk '{s+=$1} END {print s}'`).
 - `npm run ui` serves the game at http://127.0.0.1:5199/ with `strictPort`. A second checkout or worktree needs `npm run ui -- --port <other>`.
 - `npm run test:ui` is a Playwright smoke test in Chromium. It runs against its own `npm run ui` on a free port, and CI runs it as the `ui` job.
@@ -20,6 +21,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Events and frames are append-only, since saves store them and load by folding them:
   - New payload fields are optional or have a default, so older saves still parse.
   - Never rename or remove an event kind or a frame kind, or reshape its payload. Add a new kind instead and keep the old handler.
+  - `tests/fixtures/kinds.json` locks every kind and each event's payload fields (`tests/save-kinds.test.ts`). Add a new kind to its `kinds`, to `notInGoldens` until a golden save holds it, and an event's fields to `fields`, with `?` on optional ones.
   - Payloads carry outcomes (the rolled damage, the item found), never inputs that a reducer re-derives from the rules, so a rules change can't rewrite history.
   - A change that can't follow these rules raises `SAVE_FORMAT_VERSION` and adds an entry to `migrations` in `engine/run/save.ts`.
   - The golden saves in `tests/fixtures/saves/` (`*.json`) are frozen and must keep loading. Never regenerate one to make its test pass. A snapshot (`*.state.json`) may be rewritten with `node tests/golden-saves.ts --snapshots` after you review its diff, when the state changed on purpose.
@@ -46,7 +48,7 @@ Every side session is archived when its work is done, and leaves no worktree or 
 
 - **A session that leaves nothing to merge** (a check, a review, a no-change result) archives itself as its last step.
 - **A session that leaves a branch merges it into `main` itself**, then cleans up and archives itself:
-  1. Merge `origin/main` into the branch, push it, and run CI on it (`gh workflow run ci.yml --ref <branch>`) until it passes. Run `npm run check-pack` locally.
+  1. Merge `origin/main` into the branch, push it, and run CI on it (`gh workflow run ci.yml --ref <branch>`) until it passes. Run `npm run check-pack` locally, and `npm run test:books` when the change touches engine, plugin or test code. Put its counts in the merge commit.
   2. In its worktree: `git fetch origin && git checkout --detach origin/main && git merge --no-ff refs/heads/claude/<branch>`, then `git push origin HEAD:main`. If the push is rejected, another session got there first: fetch, redo the merge, and push again. CI on `main` checks the result.
   3. Fast-forward the main checkout (`git -C ~/Projects/re-roll pull --ff-only`), and watch the CI run on `main` until it passes. Fix anything it breaks.
   4. Delete the branch (`git branch -D`, plus `git push origin --delete` if it was pushed), and archive itself, which also removes its worktree.

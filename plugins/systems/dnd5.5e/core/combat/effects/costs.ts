@@ -6,11 +6,17 @@ import {
   rollDiceNotation,
   wishedKey,
 } from "../../stats.ts";
-import { type Actor, dndEvent, NS } from "../../state.ts";
+import { type Actor, dndEvent, NS, SLOT_SPENT } from "../../state.ts";
 import { type SystemEvent } from "#sdk";
 import { ItemSchema } from "../../schemas.ts";
 import { castFrom, itemUseOf, spellOfSource } from "../ids.ts";
-import { type Context, hasPassive, onceKey, slotToSpend } from "../queries.ts";
+import {
+  type Context,
+  hasPassive,
+  onceKey,
+  onOwnTurn,
+  slotToSpend,
+} from "../queries.ts";
 import { actingEnds } from "./lasting.ts";
 
 // Paying an action's costs: its resources, an item's charges and a Healer's Kit's uses.
@@ -70,6 +76,17 @@ export function payCosts(
             actor: actor.id,
             resource: `slot:${String(level)}`,
           }),
+          // Only a fight has turns; usedThisTurn wouldn't clear between them otherwise.
+          ...(context.state.combat &&
+          onOwnTurn(action) &&
+          !actor.usedThisTurn.includes(SLOT_SPENT)
+            ? [
+                dndEvent(`${NS}:oncePerTurnUsed`, {
+                  actor: actor.id,
+                  key: SLOT_SPENT,
+                }),
+              ]
+            : []),
         );
       }
     } else if ("gold" in cost) {

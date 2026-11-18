@@ -302,8 +302,7 @@ export const ArmorSchema = ItemBaseSchema.extend({
   addDex: z.boolean(),
   maxDex: z.number().int().optional(),
   strength: z.number().int().optional(), // a lower Strength score costs 10 feet of speed
-  // Magic armor made from a plain one, as +1 Chain Mail (variants.ts): the plain armor, and its own bonuses.
-  baseArmor: ContentIdSchema.optional(),
+  stealthDisadvantage: z.literal(true).optional(), // Disadvantage on Dexterity (Stealth) checks while worn
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   anyTraining: z.literal(true).optional(), // worn as if trained with it, as Elven Chain
   // From its magic item: its bonuses and passives work only while attuned, and its passives, as Armor of Resistance's.
@@ -318,7 +317,6 @@ export type Armor = z.infer<typeof ArmorSchema>;
 const ShieldItemSchema = ItemBaseSchema.extend({
   type: z.literal("shield"),
   bonus: z.number().int(),
-  baseArmor: ContentIdSchema.optional(), // a magic Shield's plain one, as a +1 Shield's (variants.ts)
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   attunement: z.literal(true).optional(), // as armor's
   curse: CurseSchema.optional(), // its magic item's

@@ -62,6 +62,8 @@ export const NO_RULES_EFFECT: Readonly<Record<string, string>> = {
     "A shared-campaign rule: a run isn't one, and its magic items are the treasure the adventure gives.",
   "project-lamordia:variant-rule/kinetic-creations":
     "A way to remake monsters, and encounters keep the adventure's own.",
+  "eberron-forge-of-the-artificer:variant-rule/mobile-bastions":
+    "A Bastion on a vehicle, and nothing runs Bastion turns yet.",
 };
 
 // The rules the run plays, from its settings.
