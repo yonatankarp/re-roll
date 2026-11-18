@@ -97,8 +97,11 @@ describe.skipIf(!BOOKS)("Arcana Unleashed familiar feats", () => {
     const run = await auRun();
     const hero = befriended(run);
     const stats = deriveStats(hero, run);
-    // Faithful Companion: Find Familiar, cast with Wisdom.
-    expect(stats.familiar).toEqual({ form: "phb:monster/owl", ability: "wis" });
+    // Faithful Companion: Find Familiar, cast with Wisdom. The Player's Handbook's plays as the SRD's, with its owl.
+    expect(stats.familiar).toEqual({
+      form: "srd52:monster/owl",
+      ability: "wis",
+    });
     // Helpful Friend's uses, and the command for Energy Pulse.
     expect(stats.passives).toContainEqual({
       kind: "familiarHelp",

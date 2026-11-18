@@ -86,3 +86,152 @@
           kind: attack
           attack: { type: weapon, flatBonus: 2 }
           damage: [{ amount: { dice: 1d4 }, type: bludgeoning }]
+# The creatures Animate Dead, Create Undead, Awaken and Finger of Death make (#126).
+- id: "srd52:monster/skeleton"
+  name: Skeleton
+  size: medium
+  creatureType: undead
+  ac: 14
+  hp: 13
+  speed: 30
+  abilities: { str: 10, dex: 16, con: 15, int: 6, wis: 8, cha: 5 }
+  proficiency: 2
+  initiative: 3
+  passives:
+    - { kind: modifier, modifier: { kind: vulnerability, damage: bludgeoning } }
+    - { kind: modifier, modifier: { kind: immunity, damage: poison } }
+    - { kind: conditionImmunity, condition: poisoned }
+  actions:
+    - name: Shortsword
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 5, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 5 }
+          damage:
+            [{ amount: { dice: 1d6, bonus: { base: 3 } }, type: piercing }]
+    - name: Shortbow
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 80, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 5 }
+          damage:
+            [{ amount: { dice: 1d6, bonus: { base: 3 } }, type: piercing }]
+- id: "srd52:monster/zombie"
+  name: Zombie
+  size: medium
+  creatureType: undead
+  ac: 8
+  hp: 15
+  speed: 20
+  abilities: { str: 13, dex: 6, con: 16, int: 3, wis: 6, cha: 5 }
+  proficiency: 2
+  initiative: -2
+  saves: [wis]
+  passives:
+    - { kind: modifier, modifier: { kind: immunity, damage: poison } }
+    - { kind: conditionImmunity, condition: poisoned }
+    - { kind: undeadFortitude }
+  actions:
+    - name: Slam
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 5, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 3 }
+          damage:
+            [{ amount: { dice: 1d8, bonus: { base: 1 } }, type: bludgeoning }]
+- id: "srd52:monster/ghoul"
+  name: Ghoul
+  size: medium
+  creatureType: undead
+  ac: 12
+  hp: 22
+  speed: 30
+  abilities: { str: 13, dex: 15, con: 10, int: 7, wis: 10, cha: 6 }
+  proficiency: 2
+  initiative: 2
+  multiattack: 2
+  passives:
+    - { kind: modifier, modifier: { kind: immunity, damage: poison } }
+    - { kind: conditionImmunity, condition: charmed }
+    - { kind: conditionImmunity, condition: poisoned }
+  actions:
+    - name: Bite
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 5, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 4 }
+          damage:
+            - { amount: { dice: 1d6, bonus: { base: 2 } }, type: piercing }
+            - { amount: { dice: 1d6 }, type: necrotic }
+    - name: Claw
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 5, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 4 }
+          damage:
+            [{ amount: { dice: 1d4, bonus: { base: 2 } }, type: slashing }]
+          onHitSave:
+            ability: con
+            dc: { base: 10 }
+            exempt: [undead, elf]
+            onFail:
+              - kind: applyCondition
+                condition: paralyzed
+                duration: { until: itsNextTurnEnd }
+- id: "srd52:monster/awakened-tree"
+  name: Awakened Tree
+  size: huge
+  creatureType: plant
+  ac: 13
+  hp: 59
+  speed: 20
+  abilities: { str: 19, dex: 6, con: 15, int: 10, wis: 10, cha: 7 }
+  proficiency: 2
+  initiative: -2
+  passives:
+    - { kind: modifier, modifier: { kind: vulnerability, damage: fire } }
+    - { kind: modifier, modifier: { kind: resistance, damage: bludgeoning } }
+    - { kind: modifier, modifier: { kind: resistance, damage: piercing } }
+  actions:
+    - name: Slam
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 10, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 6 }
+          damage:
+            [{ amount: { dice: 3d6, bonus: { base: 4 } }, type: bludgeoning }]
+# Find Familiar's form.
+- id: "srd52:monster/owl"
+  name: Owl
+  size: tiny
+  creatureType: beast
+  ac: 11
+  hp: 1
+  speed: 5
+  speeds: { walk: 5, fly: 60 }
+  abilities: { str: 3, dex: 13, con: 8, int: 2, wis: 12, cha: 7 }
+  proficiency: 2
+  initiative: 1
+  passives:
+    - { kind: noOpportunityAttacks }
+  actions:
+    - name: Talons
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 5, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 3 }
+          damage: [{ amount: { bonus: { base: 1 } }, type: slashing }]

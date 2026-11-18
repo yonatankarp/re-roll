@@ -704,8 +704,24 @@
     Wights. If you use a level 9 spell slot, you can animate or reassert control
     over six Ghouls, three Ghasts or Wights, or two Mummies. See “Monsters” for
     these stat blocks.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: true
+    resolution:
+      kind: automatic
+      effects:
+        - kind: retain
+          monster: srd52:monster/ghoul
+          count:
+            base: -9
+            add:
+              - kind: slotLevel
+              - kind: slotLevel
 - id: srd52:spell/darkvision
   name: Darkvision
   level: 2
@@ -3040,7 +3056,54 @@
     Dexterity Saving Throw: DC equals your spell save DC, each creature in a
     30-foot Cone. Failure: 2d6 damage of a type this spirit has Resistance to
     (your choice when you cast the spell). Success: Half damage."
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: summon
+          companion: srd52:companion/draconic-spirit
+          duration: &a1
+            concentration: true
+            minutes: 60
+          range: 60
+          form: Acid
+    shapes:
+      - name: Acid
+      - name: Cold
+        effects:
+          - kind: summon
+            companion: srd52:companion/draconic-spirit
+            duration: *a1
+            range: 60
+            form: Cold
+      - name: Fire
+        effects:
+          - kind: summon
+            companion: srd52:companion/draconic-spirit
+            duration: *a1
+            range: 60
+            form: Fire
+      - name: Lightning
+        effects:
+          - kind: summon
+            companion: srd52:companion/draconic-spirit
+            duration: *a1
+            range: 60
+            form: Lightning
+      - name: Poison
+        effects:
+          - kind: summon
+            companion: srd52:companion/draconic-spirit
+            duration: *a1
+            range: 60
+            form: Poison
 - id: srd52:spell/telepathic-bond
   name: Telepathic Bond
   level: 5
@@ -3548,8 +3611,20 @@
     awakened target has the Charmed condition for 30 days or until you or your
     allies deal damage to it. When that condition ends, the awakened creature
     chooses its attitude toward you.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: true
+    resolution:
+      kind: automatic
+      effects:
+        - kind: retain
+          monster: srd52:monster/awakened-tree
+          lasts: ever
 - id: srd52:spell/befuddlement
   name: Befuddlement
   level: 8
@@ -4459,7 +4534,7 @@
     damage on a failed save or half as much damage on a successful one. A
     Humanoid killed by this spell rises at the start of your next turn as a
     Zombie (see “Monsters”) that follows your verbal orders.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -4472,6 +4547,7 @@
       kind: save
       ability: con
       dc:
+        base: 0
         add:
           - kind: spellSaveDc
       damage:
@@ -4479,9 +4555,16 @@
             dice: 7d8
             bonus:
               base: 30
+              add: []
           type: necrotic
       onSuccessDamage: half
-      onFail: []
+      onFail:
+        - kind: raiseCorpse
+          monster: srd52:monster/zombie
+          range: 60
+          creatureTypes:
+            - humanoid
+          slain: true
       onSuccess: []
 - id: srd52:spell/flame-blade
   name: Flame Blade
@@ -7836,7 +7919,7 @@
   automation: full
   # shortcut: the familiar is an owl unless a feature picks another form, and it joins every fight once known.
   outOfCombat: castingTime
-  familiar: { "form": "phb:monster/owl" }
+  familiar: { "form": "srd52:monster/owl" }
 - id: srd52:spell/fireball
   name: Fireball
   level: 3
@@ -8099,7 +8182,40 @@
     (Centipede Only). Constitution Saving Throw: Your spell save DC, one
     creature the insect can see within 10 feet. Failure: The target has the
     Poisoned condition until the start of the insect’s next turn."
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: summon
+          companion: srd52:companion/giant-insect
+          duration: &a1
+            concentration: true
+            minutes: 10
+          range: 60
+          form: Spider
+    shapes:
+      - name: Spider
+      - name: Centipede
+        effects:
+          - kind: summon
+            companion: srd52:companion/giant-insect
+            duration: *a1
+            range: 60
+            form: Centipede
+      - name: Wasp
+        effects:
+          - kind: summon
+            companion: srd52:companion/giant-insect
+            duration: *a1
+            range: 60
+            form: Wasp
 - id: srd52:spell/grease
   name: Grease
   level: 1
@@ -9931,8 +10047,35 @@
     You animate or reassert control over two additional Undead creatures for
     each spell slot level above 3. Each of the creatures must come from a
     different corpse or pile of bones."
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: true
+    resolution:
+      kind: automatic
+      effects:
+        - kind: retain
+          monster: srd52:monster/skeleton
+          count:
+            base: -5
+            add:
+              - kind: slotLevel
+              - kind: slotLevel
+    shapes:
+      - name: Skeleton
+      - name: Zombie
+        effects:
+          - kind: retain
+            monster: srd52:monster/zombie
+            count:
+              base: -5
+              add:
+                - kind: slotLevel
+                - kind: slotLevel
 - id: srd52:spell/arcane-eye
   name: Arcane Eye
   level: 4
@@ -11105,7 +11248,7 @@
             [
               {
                 "kind": "summon",
-                "companion": "phb:companion/otherworldly-steed",
+                "companion": "srd52:companion/otherworldly-steed",
                 "duration": "instantaneous",
                 "range": 30,
                 "lasting": true,
@@ -13258,7 +13401,28 @@
     Force damage equal to 1d4 + 3 (Medium or smaller), 2d6 + 3 + your
     spellcasting ability modifier (Large), or 2d12 + 3 + your spellcasting
     ability modifier (Huge)."
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: summon
+          companion: srd52:companion/animated-object
+          duration:
+            concentration: true
+            minutes: 1
+          range: 120
+          count:
+            base: 0
+            add:
+              - kind: spellMod
+            min: 1
 - id: srd52:spell/arcane-hand
   name: Arcane Hand
   level: 5
