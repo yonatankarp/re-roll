@@ -32,6 +32,8 @@ import {
 import { finalDamage } from "../rules.ts";
 import type { Damage } from "../schemas.ts";
 import {
+  affects,
+  antimagicAt,
   antimagicEvents,
   believes,
   discernEvent,
@@ -354,6 +356,42 @@ const placedEvents = (state: DndState): SystemEvent[] => [
   ...placedConditionEvents(state),
 ];
 
+// A barrier its owner carries onto a creature it keeps out ends, as Antilife Shell's when its caster presses into a
+// foe.
+function forcedThrough(
+  walker: Actor,
+  before: DndState,
+  state: DndState,
+  access: ContentAccess,
+): SystemEvent[] {
+  const was = zonesOf(before, access);
+  return zonesOf(state, access).flatMap((zone) =>
+    zone.follows &&
+    zone.owner === walker.id &&
+    zone.area?.barrier &&
+    Object.values(state.actors).some(
+      (item) =>
+        item.id !== walker.id &&
+        inZone(zone, item.position) &&
+        !was.some(
+          (old) =>
+            old.sourceId === zone.sourceId &&
+            old.owner === zone.owner &&
+            inZone(old, item.position),
+        ) &&
+        affects(zone, item, state, access),
+    )
+      ? [
+          dndEvent(`${NS}:effectEnded`, {
+            actor: walker.id,
+            sourceId: zone.sourceId,
+            casterId: walker.id,
+          }),
+        ]
+      : [],
+  );
+}
+
 // Leaving an enemy's reach gives it an Opportunity Attack, made before the move, so falling stops it.
 export function runMove(
   payload: z.infer<typeof MoveSchema>,
@@ -557,7 +595,9 @@ export function runFinishMove(
   const fields =
     zonesOf(context.state).some(
       (zone) =>
-        zone.area?.noSpells === "all" || zone.area?.conditions !== undefined,
+        zone.area?.noSpells === "all" ||
+        zone.area?.conditions !== undefined ||
+        zone.area?.places !== undefined,
     ) ||
     Object.values(context.state.actors).some(
       (item) =>
@@ -583,6 +623,12 @@ export function runFinishMove(
       ...fogBoundEvents(arrived, context),
       ...(fields ? placedEvents(applyDndEvent(context.state, moved)) : []),
       ...zoneCureEvents(applyDndEvent(context.state, moved), context),
+      ...forcedThrough(
+        walker,
+        context.state,
+        applyDndEvent(context.state, moved),
+        context,
+      ),
       ...carriedEvents(walker, { x: payload.x, y: payload.y }, context),
       ...beenEvents(walker, { x: payload.x, y: payload.y }, context),
       ...revealedEvents(arrived, context),
@@ -839,6 +885,11 @@ export function teleportSquares(
   ) {
     return [];
   }
+  // No one teleports into or out of an Antimagic Field; a Leap isn't magic.
+  const field =
+    movement === 0 &&
+    zonesOf(state).some((zone) => zone.area?.noSpells === "all");
+  if (field && antimagicAt(from, state)) return [];
   // Boots of the Winding Path: only back to a square it stood on this turn.
   if (retrace) {
     const taken = occupiedKeys(state, [actor.id]);
@@ -885,7 +936,8 @@ export function teleportSquares(
         !blocked.has(key) &&
         !taken.has(key) &&
         coverBetween(from, square, blocked, noCover, new Set()) !== "total" &&
-        seeing(actor, square, state, access) !== "none"
+        seeing(actor, square, state, access) !== "none" &&
+        !(field && antimagicAt(square, state))
       ) {
         squares.push(square);
       }

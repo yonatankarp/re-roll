@@ -1,4 +1,4 @@
-import { damageBurstFrames } from "./areas.ts";
+import { burnFrames, damageBurstFrames } from "./areas.ts";
 import { z } from "zod";
 import { blockedSquares } from "../zones.ts";
 import {
@@ -237,7 +237,7 @@ function wantsSuccess(bearer: Actor, roll: Roll): boolean {
   return roll.roller.side === bearer.side;
 }
 
-function matchesRoll(
+export function matchesRoll(
   bearer: Actor,
   trigger: Trigger,
   roll: Roll,
@@ -293,6 +293,7 @@ function matchesRoll(
   }
   if (rolled.edged && !roll.edged) return false;
   if (rolled.when === "failed" && roll.success) return false;
+  if (rolled.when === "succeeded" && !roll.success) return false;
   return (
     near(bearer, subject, trigger.within) && sees(bearer, subject, context)
   );
@@ -1413,6 +1414,7 @@ export function afterDamage(
     ...concentration,
     ...reactFrames({ kind: "damaged", actor: target.id, ...cause }, context),
     ...damageBurstFrames(target, cause.types ?? [], context),
+    ...burnFrames(target, cause.types ?? [], context),
   ];
 }
 

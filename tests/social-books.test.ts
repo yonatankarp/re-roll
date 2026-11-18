@@ -16,7 +16,7 @@ import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { levelTo } from "./class-features.ts";
 import { BOOK_ROOTS } from "./depth.ts";
 
-// A sample of #150's entries as the books encode them.
+// A sample of #150's and #151's entries as the books encode them.
 
 const PLUGINS = ["phb", "arcana-unleashed", "dmg"];
 const BOOKS =
@@ -66,5 +66,24 @@ describe.skipIf(!BOOKS)("the books' language and social entries", () => {
     expect(
       picks?.some((choice) => choice.kind === "skills" && choice.bonus),
     ).toBe(true);
+  });
+
+  it("casts Detect Magic between fights to help find what's hidden, and gives a Paladin Divine Sense", () => {
+    const detect = SpellSchema.parse(run.content("phb:spell/detect-magic"));
+    expect(detect.activation?.outOfCombat).toBe("scene");
+    expect(detect.activation?.resolution).toMatchObject({
+      effects: [{ modifier: { kind: "sceneAid", about: ["hidden", "lore"] } }],
+    });
+    const paladin = deriveStats(
+      levelTo(run, "phb:class/paladin", null, 3),
+      run,
+    );
+    expect(
+      paladin.actions.some((item) => item.name.includes("Divine Sense")),
+    ).toBe(true);
+    const spike = SpellSchema.parse(run.content("phb:spell/mind-spike"));
+    expect(spike.activation?.resolution).toMatchObject({
+      onFail: [{ modifier: { kind: "outlined" } }],
+    });
   });
 });

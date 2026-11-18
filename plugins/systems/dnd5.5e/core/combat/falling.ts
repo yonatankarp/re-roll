@@ -8,7 +8,7 @@ import {
   type SystemResult,
 } from "#sdk";
 import { distanceFeet, squareKey } from "../grid.ts";
-import { blockingSet } from "../zones.ts";
+import { blockingSet, inZone, zonesOf } from "../zones.ts";
 import { finalDamage } from "../rules.ts";
 import type { LeafEffect } from "../schemas.ts";
 import { seeing } from "../sight.ts";
@@ -277,6 +277,12 @@ export function fallFrames(context: Context): Frame[] {
   );
 }
 
+// Landing in an updraft, as Control Winds', hurts half as much.
+const softLanding = (actor: Actor, state: DndState): boolean =>
+  zonesOf(state).some(
+    (zone) => zone.area?.softFalls === true && inZone(zone, actor.position),
+  );
+
 const FallSchema = z.object({
   actors: z.array(z.string()),
   feet: z.number(),
@@ -409,7 +415,8 @@ export function runFall(
     // Low Gravity: falls hurt half as much.
     const fallen = Math.max(
       0,
-      (context.state.combat?.environment?.halfFalls
+      (context.state.combat?.environment?.halfFalls ||
+      softLanding(actor, context.state)
         ? Math.floor(rolled / 2)
         : rolled) - (lessened.get(actor.id) ?? 0),
     );

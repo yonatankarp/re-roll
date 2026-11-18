@@ -17,8 +17,10 @@ import {
   StateSchema,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import { rollBonus } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import { matchesRoll } from "../plugins/systems/dnd5.5e/core/combat/reactions.ts";
 
 // Languages and social checks (#150): what a check's skill deals with, checks with whom, and a skill pick's bonus.
+// Detection and divination (#151): what's hidden, lore and the way, and a reaction to a foe's success.
 
 let run: RunContext;
 let hero: Actor;
@@ -139,5 +141,48 @@ describe("social checks", () => {
         "cha",
       );
     expect(bonus(picked) - bonus(hero)).toBe(3);
+  });
+});
+
+describe("detection and divination", () => {
+  it("reads finding what's hidden, lore and the way from a check's skill", () => {
+    expect(obstaclesOf({ skill: "perception", dc: 12 }, run)).toEqual([
+      "hidden",
+    ]);
+    expect(obstaclesOf({ skill: "religion", dc: 12 }, run)).toEqual(["lore"]);
+    expect(obstaclesOf({ skill: "survival", dc: 12 }, run)).toEqual(["way"]);
+  });
+
+  it("answers a foe's roll only once it succeeds", () => {
+    const foe: Actor = { ...hero, id: "foe", side: "enemy" };
+    const watcher: Actor = { ...hero, position: { x: 0, y: 0 } };
+    const trigger = {
+      rolled: {
+        rolls: ["save" as const],
+        by: "foe" as const,
+        when: "succeeded" as const,
+      },
+    };
+    const context = {
+      ...run,
+      state: {
+        actors: {
+          [watcher.id]: watcher,
+          foe: { ...foe, position: { x: 1, y: 0 } },
+        },
+        combat: null,
+      },
+      dice: { below: () => 0, roll: () => 1 },
+    };
+    const roll = (success: boolean) => ({
+      roller: { ...foe, position: { x: 1, y: 0 } },
+      kind: "save" as const,
+      natural: 12,
+      total: 15,
+      success,
+      goal: 14,
+    });
+    expect(matchesRoll(watcher, trigger, roll(true), context)).toBe(true);
+    expect(matchesRoll(watcher, trigger, roll(false), context)).toBe(false);
   });
 });

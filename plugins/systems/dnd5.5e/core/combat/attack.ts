@@ -1,6 +1,6 @@
 import { prisonEvents } from "./fear.ts";
 import { z } from "zod";
-import { placedFlag, zoneGrants, zonesOf } from "../zones.ts";
+import { deflection, placedFlag, zoneGrants, zonesOf } from "../zones.ts";
 import { concentrationBonus } from "./school.ts";
 import {
   type Actor,
@@ -1241,6 +1241,10 @@ export function runAttackRoll(
     ) ||
     crowded ||
     longRange ||
+    // Ranged weapon attacks through a wind or a wall of water, as Wall of Water's.
+    (ranged &&
+      resolution.attack.type === "weapon" &&
+      deflection(state, attacker.position, target.position) !== null) ||
     underwaterHampered(attacker, action, resolution, context) ||
     // Speedy or Boots of Speed: an Opportunity Attack, one made on the target's own turn, has Disadvantage.
     (inOwnTurn(target, context) &&
