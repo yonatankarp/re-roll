@@ -632,6 +632,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:inspiration:`)) return first.id;
   if (decision.id.startsWith(`${NS}:deathSave:`)) return first.id;
   if (decision.id.startsWith(`${NS}:form:`)) return first.id; // the strongest form
+  if (decision.id.startsWith(`${NS}:choose:`)) return first.id; // a transformation's first option
   if (decision.id.startsWith(`${NS}:wish:`)) return first.id; // the highest level
   if (decision.id.startsWith(`${NS}:tablePick:`)) return first.id; // a row not harmful, listed first
   if (decision.id.startsWith(`${NS}:shape:`)) return first.id; // as written, as Forcecage's box

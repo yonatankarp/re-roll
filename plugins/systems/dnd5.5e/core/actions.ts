@@ -50,6 +50,7 @@ import {
   currentActor,
   hasPassive,
   hitFits,
+  underEffect,
   inReach,
   sizeOf,
   luckyEdge,
@@ -2396,7 +2397,9 @@ export function runMasteryHit(
   const [more] = stats.passives.flatMap((passive) =>
     passive.kind === "extraMastery" &&
     hitFits(passive.with, action, attacker, context) &&
-    currentActor(state)?.id === attacker.id
+    (passive.while
+      ? underEffect(attacker, passive.while)
+      : currentActor(state)?.id === attacker.id)
       ? passive.masteries.filter((item) => item !== chosen)
       : [],
   );

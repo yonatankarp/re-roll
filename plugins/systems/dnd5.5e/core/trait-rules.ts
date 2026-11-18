@@ -157,7 +157,13 @@ export function traitSaveAdvantage(
           ? conditions.includes("polymorph")
           : coversSave(passive, ability, conditions, source))) ||
       (passive.kind === "concentrationAdvantage" &&
-        conditions.includes("concentration")),
+        conditions.includes("concentration") &&
+        (!passive.whileAspect ||
+          target?.activeEffects.some(
+            ({ modifier }) =>
+              modifier.kind === "aspect" &&
+              modifier.name === passive.whileAspect,
+          ) === true)),
   );
 }
 
@@ -663,14 +669,21 @@ export function rescuedCheck(
 }
 
 // Trance of Order: the least any D20 Test's d20 counts as.
-export function d20Floor(actor: Actor, stats: Stats): number {
+export function d20Floor(
+  actor: Actor,
+  stats: Stats,
+  concentration = false, // a save to keep Concentration, as Starry Form's Dragon floors
+): number {
   return Math.max(
     1,
     ...[
       ...actor.activeEffects.map(({ modifier }) => modifier),
       ...passiveModifiers(stats.passives),
     ].flatMap((modifier) =>
-      modifier.kind === "checkFloor" && modifier.all ? [modifier.value] : [],
+      modifier.kind === "checkFloor" &&
+      (modifier.all || (concentration && modifier.concentration))
+        ? [modifier.value]
+        : [],
     ),
   );
 }

@@ -41,7 +41,7 @@ import {
 } from "./effects.ts";
 import { tableOf, tableRoll } from "./reactions.ts";
 import { teleportFrame } from "./movement.ts";
-import { type Context, enemies } from "./queries.ts";
+import { type Context, enemies, hasAspect } from "./queries.ts";
 
 // The Arcana Unleashed adepts' riders on casting a spell of their school (passive `schoolCast`).
 
@@ -321,6 +321,18 @@ export function castRiders(
     ) {
       return [];
     }
+    if (passive.whileAspect && !hasAspect(actor, passive.whileAspect)) {
+      return [];
+    }
+    const level =
+      passive.level && (stats.classLevels[passive.level.class] ?? 0);
+    if (
+      passive.level &&
+      ((level ?? 0) < (passive.level.min ?? 1) ||
+        (level ?? 0) > (passive.level.max ?? 20))
+    ) {
+      return [];
+    }
     if (passive.refills && (actor.resourcesSpent[passive.refills] ?? 0) === 0) {
       return [];
     }
@@ -390,7 +402,9 @@ export function castRiders(
           : passive.mends
             ? heals(action) || cures(action)
             : passive.heals
-              ? heals(action) && targets.some((item) => item.id !== actor.id)
+              ? heals(action) &&
+                (passive.selfToo === true ||
+                  targets.some((item) => item.id !== actor.id))
               : passive.types
                 ? passive.types.some((type) => types.has(type))
                 : passive.damage !== undefined && types.has(passive.damage);
