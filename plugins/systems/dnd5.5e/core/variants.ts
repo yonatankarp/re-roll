@@ -212,18 +212,20 @@ function version(
       ...base,
       id,
       name: named,
-      baseArmor: base.id,
       ...bonuses,
       ...magic,
       ...(parent.anyTraining ? { anyTraining: true as const } : {}),
     };
-    if (parent.noStrength) delete item.strength;
+    // Mithral: no Strength score needed, and no Disadvantage on Stealth.
+    if (parent.noStrength) {
+      delete item.strength;
+      delete item.stealthDisadvantage;
+    }
   } else if (base.type === "shield") {
     item = {
       ...base,
       id,
       name: named,
-      baseArmor: base.id,
       ...bonuses,
       ...magic,
     };

@@ -166,7 +166,13 @@ export function retributionEvents(
     events.push(
       ...dealEvents(
         bearer,
-        [{ amount: effect.self * left, type: "force" }],
+        [
+          {
+            amount: effect.self * left,
+            type: "force",
+            response: damageResponses(bearer, context),
+          },
+        ],
         false,
         context,
       ).events,

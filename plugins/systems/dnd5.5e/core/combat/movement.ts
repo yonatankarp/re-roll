@@ -1035,7 +1035,11 @@ function aroundTeleport(
       : null;
     const hits = (around.damage ?? []).map(({ amount, type }) => {
       const rolled = rollAmount(amount, stats, context.dice);
-      return { amount: save?.saved ? Math.floor(rolled / 2) : rolled, type };
+      return {
+        amount: save?.saved ? Math.floor(rolled / 2) : rolled,
+        type,
+        response: damageResponses(target, context),
+      };
     });
     const dealt =
       hits.length > 0 ? dealEvents(target, hits, false, context).events : [];

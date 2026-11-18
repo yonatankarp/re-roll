@@ -74,14 +74,10 @@ export function startCombat(
       readonly monster: string;
       readonly count: number;
     }[];
-    readonly forPartySize?: number | undefined;
     readonly battlemap?: Battlemap | undefined;
     readonly loot?: Loot | undefined;
     readonly lair?: boolean | undefined;
-    readonly surprise?: "party" | "enemies" | undefined;
     readonly sunlight?: true | undefined;
-    readonly underwater?: true | undefined;
-    readonly environment?: readonly string[] | undefined;
   },
   context: Context,
   { canFlee, defeatContinues }: EncounterOptions,
@@ -89,12 +85,8 @@ export function startCombat(
   const party = Object.values(context.state.actors).filter(
     (actor) => actor.side === "party" && !isDead(actor),
   );
-  const { forPartySize } = encounter;
   const monsters: Actor[] = [];
-  for (const { monster, count: written } of encounter.monsters) {
-    const count = forPartySize
-      ? Math.max(1, Math.round((written * party.length) / forPartySize))
-      : written;
+  for (const { monster, count } of encounter.monsters) {
     const statBlock = lookup(context, MonsterSchema, monster);
     const slug = monster.slice(monster.lastIndexOf("/") + 1);
     for (let index = 1; index <= count; index += 1) {
@@ -144,14 +136,14 @@ export function startCombat(
     ...retinueActors(party, context),
   ];
 
-  // The story's word on surprise, such as from a Stealth check, beats the encounter's own.
+  // The story's word on surprise, such as from a Stealth check.
   // Alarm or a Faithful Hound readied in this scene: the party isn't caught unawares.
   const alarmed = party.some((actor) =>
     actor.activeEffects.some(
       ({ modifier }) => modifier.kind === "prepared" && modifier.alert,
     ),
   );
-  const told = context.state.surprise ?? encounter.surprise;
+  const told = context.state.surprise;
   const surprised = alarmed && told === "party" ? undefined : told;
   const caught = { party: "party", enemies: "enemy" }[surprised ?? "party"];
   // Zhentarim Ruffian's Family First: Heroic Inspiration held now buys the party Advantage on Initiative.
@@ -309,8 +301,9 @@ export function startCombat(
     ? openedCorners(walls, grid, startsOf(party), startsOf(monsters))
     : [];
 
-  // What the party's magic calms, as Control Weather a storm, doesn't come into the fight.
-  const around = uncalmed(encounter.environment, context.state, context);
+  // A fight is fought in the effects the story put the party in (the environment effect), less what the party's
+  // magic calms, as Control Weather a storm.
+  const around = uncalmed(context.state.ambient, context.state, context);
   const environment = fightEnvironment(around, context);
   const started = {
     encounter: encounter.id,
@@ -336,7 +329,6 @@ export function startCombat(
     ...(defeatContinues ? { defeatContinues } : {}),
     ...(encounter.loot ? { loot: encounter.loot } : {}),
     ...(encounter.sunlight ? { sunlight: true as const } : {}),
-    ...(encounter.underwater ? { underwater: true as const } : {}),
     ...(environment ? { environment } : {}),
     ...(surprised ? { surprised } : {}),
     ...(lair ? { lair } : {}),

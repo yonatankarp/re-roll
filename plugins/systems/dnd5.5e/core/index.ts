@@ -108,6 +108,7 @@ import { sceneSwapActions, swapEffects, swapFrames } from "./swap.ts";
 import { sceneEffects, scenePredicates } from "./scene.ts";
 import { gearPolicy, isGearDecision } from "./policy.ts";
 import { legendaryFrames, surpriseEffects } from "./legendary.ts";
+import { lintEntry } from "./lint.ts";
 import { shopEffects, shopFrames } from "./shop.ts";
 import { availableRests, restEffects, restFrames } from "./rest.ts";
 import {
@@ -321,21 +322,9 @@ function characterActor(
 
 // Whose entry wins when books print the same name, highest first. Books not listed rank between these and the SRD.
 const LEADING_BOOKS = ["phb", "monster-manual", "dmg"];
-// shortcut: these 2014-edition books' manifests don't set edition. Set `edition: "2014"` there and drop the list.
-const OLDER_BOOKS = new Set([
-  "basic-rules-2014",
-  "spelljammer-creatures",
-  "sword-coast-guide",
-  "xanathars-guide",
-]);
-// An unset edition means 2024, apart from the older books listed above.
-const editionOf = ({
-  id,
-  edition,
-}: {
-  id: string;
-  edition?: string | undefined;
-}) => edition ?? (OLDER_BOOKS.has(id) ? "2014" : "2024");
+// A book sets `edition: "2014"` in its manifest; an unset edition means 2024.
+const editionOf = ({ edition }: { edition?: string | undefined }) =>
+  edition ?? "2024";
 
 const CharacterChosenPayload = z.object({ answer: z.string() });
 const ActorPayload = z.object({ actor: z.string() });
@@ -465,6 +454,7 @@ export const dnd55e = defineSystem<DndState>({
   outcomes: { keys: ["success", "failure"] },
   importKinds: { spells: spellImportKind },
   edition: editionOf,
+  lint: lintEntry,
   precedence: (plugin) => {
     const { id } = plugin;
     if (editionOf(plugin) === "2014") return LEADING_BOOKS.length + 2;

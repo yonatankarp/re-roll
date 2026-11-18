@@ -1321,7 +1321,7 @@ describe("resistances and protections", () => {
       true,
     );
     expect(payloads(spell.events, "damaged")).toEqual([
-      expect.objectContaining({ amount: 2 }),
+      expect.objectContaining({ amount: 3 }), // 10 less 3, then halved (#216)
     ]);
     const plain = dealEvents(
       me,

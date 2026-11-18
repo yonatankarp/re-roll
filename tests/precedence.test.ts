@@ -105,7 +105,10 @@ async function loadWith(
   return loadRun(storage, catalog, [dnd55e], [ADVENTURE]);
 }
 
-const BOOKS = { ...book("basic-rules-2014"), ...book("phb") };
+const BOOKS = {
+  ...book("basic-rules-2014", { edition: "2014" }),
+  ...book("phb"),
+};
 
 async function winners(adventure: Readonly<Record<string, unknown>> = {}) {
   const loaded = await loadWith(BOOKS, adventure);
@@ -214,7 +217,8 @@ describe("content precedence", () => {
         )
         .sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : 1))
         .map((item) => item.id);
-    expect(order()).toEqual([
+    const older = { "basic-rules-2014": "2014", "xanathars-guide": "2014" };
+    expect(order(older)).toEqual([
       "phb",
       "monster-manual",
       "dmg",
@@ -223,9 +227,9 @@ describe("content precedence", () => {
       "basic-rules-2014",
       "xanathars-guide",
     ]);
-    // A manifest's own edition wins over the system's guess.
+    // The manifest's edition decides, and an unset one is 2024.
     expect(
-      order({ "heroes-of-faerun": "2014", "xanathars-guide": "2024" }),
+      order({ "basic-rules-2014": "2014", "heroes-of-faerun": "2014" }),
     ).toEqual([
       "phb",
       "monster-manual",

@@ -251,6 +251,14 @@ export function withUnarmedBonus(
   };
 }
 
+// Versatile's two-handed damage: the die one size larger, as a Longsword's 1d8 to 1d10.
+export function largerDie(dice: string): string {
+  return dice.replace(/d(\d+)$/, (_, sides: string) => {
+    const next = [4, 6, 8, 10, 12].find((size) => size > Number(sides));
+    return `d${String(next ?? Number(sides))}`;
+  });
+}
+
 export function weaponActivation(
   weapon: Weapon,
   abilities: AbilityScores,
@@ -258,6 +266,7 @@ export function weaponActivation(
   damageBonus = 0,
   itemBonus = 0,
   classIds: readonly string[] = [], // the wielder's classes, for a weapon's `classAbility`
+  twoHanded = false, // held in both hands: a Versatile weapon rolls its die one size larger
 ): Activation {
   const ranged = weapon.properties.includes("ammunition");
   const finesse = weapon.properties.includes("finesse");
@@ -301,7 +310,14 @@ export function weaponActivation(
       damage: [
         {
           amount: {
-            ...(weapon.damage.dice ? { dice: weapon.damage.dice } : {}),
+            ...(weapon.damage.dice
+              ? {
+                  dice:
+                    twoHanded && weapon.properties.includes("versatile")
+                      ? largerDie(weapon.damage.dice)
+                      : weapon.damage.dice,
+                }
+              : {}),
             bonus: {
               base: (weapon.damage.flat ?? 0) + damageBonus,
               add: [{ kind: "abilityMod", ability }],

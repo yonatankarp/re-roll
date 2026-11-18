@@ -529,7 +529,13 @@ export function burstEvents(
       ...save.events,
       ...dealEvents(
         foe,
-        [{ amount: save.saved ? halved(rolled) : rolled, type: burst.type }],
+        [
+          {
+            amount: save.saved ? halved(rolled) : rolled,
+            type: burst.type,
+            response: damageResponses(foe, context),
+          },
+        ],
         false,
         context,
       ).events,
@@ -754,6 +760,7 @@ export function dealEvents(
         damage.map(({ amount, type }) => ({
           amount: amount.dice ? rollDiceNotation(amount.dice, context.dice) : 0,
           type,
+          response: damageResponses(hurt, { ...context, state }),
         })),
         false,
         { ...context, state },

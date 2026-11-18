@@ -21,6 +21,7 @@ import {
 import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { buildAbilities } from "../plugins/systems/dnd5.5e/core/stats/abilities.ts";
 import { bestAc } from "../plugins/systems/dnd5.5e/core/stats/armor-class.ts";
+import { lintEntry } from "../plugins/systems/dnd5.5e/core/lint.ts";
 import { scripted } from "./feat-fixtures.ts";
 
 // The smaller rules gaps of #216, each against the 2024 rules.
@@ -209,5 +210,68 @@ describe("effect kinds", () => {
       kind: `${NS}:inspirationGranted`,
       payload: { actor: fighter.id },
     });
+  });
+});
+
+describe("weapons and armor", () => {
+  const longswordDie = (actor: Actor, run: RunContext) => {
+    const sword = deriveStats(actor, run).actions.find(
+      (action) => action.id === "weapon:srd52:item/longsword",
+    );
+    const { resolution } = sword?.activation ?? {};
+    return resolution?.kind === "attack"
+      ? resolution.damage[0]?.amount.dice
+      : undefined;
+  };
+
+  it("rolls a Versatile weapon's larger die without a Shield", async () => {
+    const run = await goblin();
+    const fighter = pregen(run, "srd52:pregen/fighter");
+    expect(longswordDie(fighter, run)).toBe("1d8");
+    const twoHands = {
+      ...fighter,
+      inventory: fighter.inventory.filter((id) => !id.endsWith("/shield")),
+    };
+    expect(longswordDie(twoHands, run)).toBe("1d10");
+  });
+
+  it("gives Disadvantage on Stealth in Chain Mail", async () => {
+    const run = await goblin();
+    const hampered = (actor: Actor) =>
+      deriveStats(actor, run).passives.some(
+        (passive) =>
+          passive.kind === "modifier" &&
+          passive.modifier.kind === "disadvantage" &&
+          passive.modifier.skills?.includes("stealth") === true,
+      );
+    const fighter = pregen(run, "srd52:pregen/fighter");
+    expect(hampered(fighter)).toBe(true);
+    expect(
+      hampered({
+        ...fighter,
+        inventory: fighter.inventory.filter((id) => !id.endsWith("chain-mail")),
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("check-pack's effect positions", () => {
+  it("reports a kind where nothing reads it, and not where something does", () => {
+    const read = {
+      activations: [
+        {
+          resolution: { kind: "automatic", effects: [{ kind: "teleport" }] },
+        },
+      ],
+    };
+    expect(lintEntry(read)).toEqual([]);
+    const dropped = {
+      passives: [
+        { kind: "damageRider", effects: [{ kind: "reactionAttack" }] },
+      ],
+    };
+    expect(lintEntry(dropped)).toEqual([
+      "effect reactionAttack at passives.0.effects.0 is never read there",
+    ]);
   });
 });

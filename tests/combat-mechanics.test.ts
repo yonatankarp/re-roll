@@ -532,10 +532,10 @@ describe("lingering damage", () => {
     const cast = settle(
       run,
       start,
-      [act(PLAYER_ACTOR, `spell:${spell("conjure-elemental")}|@5,5`)],
+      [act(PLAYER_ACTOR, `spell:${spell("conjure-elemental")}|@5,5`), endTurn],
       LOW,
     );
-    // The cast ends the caster's turn, and the spirit seizes the first foe as its turn starts.
+    // The caster ends its turn, and the spirit seizes the first foe as its turn starts.
     expect(restrained(cast.state, "a")).toBe(true);
     expect(damageOf(cast.events, "a")).toEqual([8]);
     const second = settle(run, cast.state, [endTurn], LOW);
@@ -714,7 +714,7 @@ describe("lingering damage", () => {
     const cast = settle(
       run,
       start,
-      [act(PLAYER_ACTOR, `spell:${spell("prismatic-wall")}|@6,6`)],
+      [act(PLAYER_ACTOR, `spell:${spell("prismatic-wall")}|@6,6`), endTurn],
       LOW,
     );
     expect(blockedSquares(cast.state, "sight")).toContain("9,6");
@@ -3076,16 +3076,17 @@ describe("class feature building blocks", () => {
 
 describe("replay", () => {
   it("replays whole fights exactly, with the new spells cast along the way", async () => {
+    // The Bonus Action ones first, since one slot a turn would leave them behind an Action's.
     const spells = [
+      "hex",
+      "divine-favor",
+      "divine-smite",
+      "searing-smite",
       "moonbeam",
       "spirit-guardians",
       "magic-missile",
       "scorching-ray",
       "eldritch-blast",
-      "hex",
-      "divine-favor",
-      "divine-smite",
-      "searing-smite",
       "faerie-fire",
       "guiding-bolt",
       "fireball",
@@ -3123,13 +3124,18 @@ describe("replay", () => {
       const inputs: Input[] = [{ kind: "start" }];
       for (let count = 0; pending && count < 300; count += 1) {
         const { options }: Decision = pending;
-        const fresh = options.find((option) =>
-          [...untried].some((slug) => option.id.includes(spell(slug))),
-        );
+        const fresh = [...untried]
+          .map((slug) =>
+            options.find((option) => option.id.includes(spell(slug))),
+          )
+          .find((option) => option !== undefined);
+        // Walking about once the action is spent only uses up the decisions, so random play doesn't.
+        const picks = options.filter((option) => option.id !== MOVE);
         const chosen =
           options.find((option) => option.id === "srd52:pregen/wizard") ??
           fresh ??
-          options[dice.below(options.length)];
+          picks[dice.below(picks.length)] ??
+          options[0];
         if (!chosen) throw new Error(`${pending.id} has no options`);
         for (const slug of untried) {
           if (chosen.id.includes(spell(slug))) untried.delete(slug);

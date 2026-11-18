@@ -635,33 +635,6 @@ describe("life and death in combat", () => {
     ).toEqual({});
   });
 
-  it("scales monster counts to the living party when an encounter asks", async () => {
-    const run = await goblin();
-    const state = fightState(run); // two living party members
-    const monster = "srd52:monster/goblin-warrior";
-    const count = (written: number, forPartySize?: number): number => {
-      const { events = [] } = startCombat(
-        {
-          id: "e",
-          monsters: [{ monster, count: written }],
-          ...(forPartySize ? { forPartySize } : {}),
-        },
-        makeContext(run, state),
-        { canFlee: false, defeatContinues: false },
-      );
-      const started = events.find(
-        (event) => event.kind === `${NS}:combatStarted`,
-      );
-      if (!started || !("payload" in started)) throw new Error("No combat");
-      return (started.payload.monsters as readonly unknown[]).length;
-    };
-    expect(count(4)).toBe(4);
-    expect(count(4, 4)).toBe(2);
-    expect(count(1, 8)).toBe(1); // always at least one
-    expect(count(3, 2)).toBe(3);
-    expect(count(2, 1)).toBe(4);
-  });
-
   it("starts a fight on its battle map, with walls that block the way", async () => {
     const run = await goblin();
     const state = fightState(run);
@@ -1471,7 +1444,6 @@ describe("encounter outcomes in real fights", () => {
             {
               id: "brawl",
               monsters: [{ monster: "srd52:monster/goblin-warrior", count: 4 }],
-              forPartySize: 4,
               onDefeat: [{ kind: "goto", scene: "captured" }],
               onFlee: [{ kind: "goto", scene: "fled" }],
             },
@@ -1523,7 +1495,7 @@ describe("encounter outcomes in real fights", () => {
     const { run } = await outcomesRun();
     // One pinned seed per way out (#209). The soak run plays all 80.
     const pinned = {
-      "outcome-0": "road",
+      "outcome-11": "road",
       "outcome-1": "fled",
       "outcome-6": "captured",
       "outcome-10": "dead",

@@ -5,12 +5,16 @@ import {
   type Stats,
 } from "../../stats.ts";
 import { type Actor, dndEvent, isDead, NS, turnId } from "../../state.ts";
-import { type SystemEvent } from "#sdk";
-import { type DamageType, type AlliesRider } from "../../schemas.ts";
+import { type Frame, type SystemEvent } from "#sdk";
+import {
+  type DamageType,
+  type AlliesRider,
+  type LeafEffect,
+} from "../../schemas.ts";
 import { distanceFeet } from "../../grid.ts";
 import { allies, type Context, hitFits, underEffect } from "../queries.ts";
 import { leafEvents } from "./leaf.ts";
-import { reactionMove } from "./forced-reactions.ts";
+import { reactionAttack, reactionMove } from "./forced-reactions.ts";
 
 // Riders: what a damage type, an activation's allies or a Dash or Disengage adds.
 
@@ -111,10 +115,24 @@ export function alliesRiderEvents(
   sourceId: string,
   actor: Actor,
   context: Context,
-): SystemEvent[] {
+): { events: SystemEvent[]; frames: Frame[] } {
   const stats = deriveStats(actor, context);
   const spent: Record<string, number> = {};
-  return riders.flatMap((rider) => {
+  const frames: Frame[] = [];
+  // An ally's reaction, as a Banneret's Rallying Surge gives, is taken as the forced reactions are; the rest are leaves.
+  const onAlly = (effects: readonly LeafEffect[], ally: Actor): SystemEvent[] =>
+    effects.flatMap((effect) => {
+      if (effect.kind === "reactionMove") {
+        return reactionMove(ally, context, effect, actor);
+      }
+      if (effect.kind === "reactionAttack") {
+        const struck = reactionAttack(ally, context);
+        frames.push(...struck.frames);
+        return struck.events;
+      }
+      return leafEvents([effect], sourceId, actor, ally, context);
+    });
+  const events = riders.flatMap((rider) => {
     if (rider.without?.some((id) => stats.features.includes(id))) return [];
     const effects = [
       ...rider.effects,
@@ -156,11 +174,7 @@ export function alliesRiderEvents(
         }),
       );
     }
-    return [
-      ...costs,
-      ...near.flatMap((ally) =>
-        leafEvents(effects, sourceId, actor, ally, context),
-      ),
-    ];
+    return [...costs, ...near.flatMap((ally) => onAlly(effects, ally))];
   });
+  return { events, frames };
 }

@@ -464,6 +464,9 @@ export function castAction(
           false,
           aimSquare(targetId, state) ?? undefined,
         );
+  const alliesRide = action.activation.alsoAllies
+    ? alliesRiderEvents(action.activation.alsoAllies, action.id, actor, context)
+    : { events: [], frames: [] };
   return {
     events: [
       ...(paid ? [] : payCosts(action, actor, context, slotLevel)),
@@ -513,14 +516,7 @@ export function castAction(
             context,
           )
         : []),
-      ...(action.activation.alsoAllies
-        ? alliesRiderEvents(
-            action.activation.alsoAllies,
-            action.id,
-            actor,
-            context,
-          )
-        : []),
+      ...alliesRide.events,
       ...passedSaves,
       ...(foiled?.events ?? []),
       ...lightAttackEvents(actor, actionId, context),
@@ -552,6 +548,21 @@ export function castAction(
     frames: [
       ...(result.frames ?? []),
       ...riders.frames,
+      ...alliesRide.frames,
+      // A teleport of the bearer's own whatever its targets, as Thunder Step's, lands where it picks.
+      ...(action.activation.alsoSelf ?? []).flatMap((effect) =>
+        effect.kind === "teleport"
+          ? [
+              teleportFrame(
+                actor,
+                effect.feet,
+                effect.movement,
+                context,
+                effect.provokes,
+              ),
+            ]
+          : [],
+      ),
       // Steel Wind Strike: the teleport once its attacks are made.
       ...(action.activation.teleportAfter !== undefined && caught[0]
         ? [

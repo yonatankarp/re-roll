@@ -443,6 +443,7 @@ export function castRiders(
   // the last with Tamed Surge, or from two rolls with Controlled Chaos.
   const aimed = targets.find((target) => target.id !== actor.id);
   const level = slotLevel ?? action.spellLevel;
+  const allyFrames: Frame[] = [];
   const tables = rides.flatMap(({ rollTable, pick, resource }) => {
     const table = rollTable ? tableOf(rollTable, context) : undefined;
     if (!rollTable || !table) return [];
@@ -618,18 +619,23 @@ export function castRiders(
             : []),
           // On the caster's allies near it, as Unicorn Spirit's healing.
           ...(ride.allies
-            ? alliesRiderEvents(
-                [ride.allies],
-                `castRider:${action.id}`,
-                actor,
-                context,
-              )
+            ? ((): SystemEvent[] => {
+                const ridden = alliesRiderEvents(
+                  [ride.allies],
+                  `castRider:${action.id}`,
+                  actor,
+                  context,
+                );
+                allyFrames.push(...ridden.frames);
+                return ridden.events;
+              })()
             : []),
         ];
       }),
     ],
     frames: [
       ...tables.flatMap((rolled) => rolled.frames),
+      ...allyFrames,
       ...rides.flatMap(({ effects, choices }) => [
         ...(choices ? riderChoiceFrame(actor, choices, action, context) : []),
         ...effects.flatMap((effect) =>

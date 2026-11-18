@@ -76,7 +76,10 @@ export function payCosts(
             actor: actor.id,
             resource: `slot:${String(level)}`,
           }),
-          ...(onOwnTurn(action) && !actor.usedThisTurn.includes(SLOT_SPENT)
+          // Only a fight has turns; usedThisTurn wouldn't clear between them otherwise.
+          ...(context.state.combat &&
+          onOwnTurn(action) &&
+          !actor.usedThisTurn.includes(SLOT_SPENT)
             ? [
                 dndEvent(`${NS}:oncePerTurnUsed`, {
                   actor: actor.id,
