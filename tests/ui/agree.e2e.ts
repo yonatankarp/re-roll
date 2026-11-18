@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Page, expect, test } from "@playwright/test";
 import { openHeadless } from "../../app/cli/headless-game.ts";
+import { playUntil } from "./onward.ts";
 import { savedFiles } from "./saved-files.ts";
 
 // The page and headless play must offer the same choices. At each screen, the run the page autosaved is
@@ -131,22 +132,13 @@ test("the page and headless play offer the same choices", async ({ page }) => {
       .click();
     const map = page.locator(".dnd-cell").first();
     const turn = page.locator(".options > .tabs > .tab").first();
-    const onward = page.getByRole("button", {
-      name: /^(Carry on|Drive them off)$/,
-    });
-    for (let tries = 0; tries < 40; tries += 1) {
-      if (
+    await playUntil(
+      page,
+      async () =>
         (await map.isVisible()) &&
         (await turn.isVisible()) &&
-        (await page.locator(".settling").count()) === 0
-      ) {
-        break;
-      }
-      if (await onward.first().isVisible()) await onward.first().click();
-      else await page.keyboard.press("Enter");
-      await page.waitForTimeout(300);
-    }
-    await expect(turn).toBeVisible();
+        (await page.locator(".settling").count()) === 0,
+    );
     const fight = await agree();
     expect(fight.filter((id) => id.startsWith("list:")).length).toBeGreaterThan(
       1,

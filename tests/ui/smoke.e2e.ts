@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { playUntil } from "./onward.ts";
 
 // Plays into the first fight of the shipped adventure by mouse, as a player would, and fails on any console error.
 test("starts the shipped adventure and plays a turn on the map", async ({
@@ -25,15 +26,7 @@ test("starts the shipped adventure and plays a turn on the map", async ({
 
   // The check's die waits for a click, then a found item, the ambush or the fight's scene may come first.
   const map = page.locator(".dnd-cell").first();
-  const onward = page.getByRole("button", {
-    name: /^(Carry on|Drive them off)$/,
-  });
-  for (let tries = 0; tries < 20 && !(await map.isVisible()); tries += 1) {
-    if (await onward.first().isVisible()) await onward.first().click();
-    else await page.keyboard.press("Enter");
-    await page.waitForTimeout(300);
-  }
-  await expect(map).toBeVisible();
+  await playUntil(page, () => map.isVisible());
 
   const log = page.locator("ol.log > li");
   const before = await log.count();
@@ -65,6 +58,9 @@ test("starts the shipped adventure and plays a turn on the map", async ({
 // a name, then asks before the story's early ending.
 test("makes a character and confirms an early ending", async ({ page }) => {
   const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
   page.on("pageerror", (error) => errors.push(error.message));
 
   await page.goto("/");
