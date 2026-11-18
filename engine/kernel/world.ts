@@ -11,7 +11,7 @@ import {
 export const WorldEntrySchema = ContentEntrySchema.extend({
   name: z.string().min(1),
   source: z.string().min(1), // the book's title
-  // shortcut: optional, since the imported library has no printed page numbers. Require it once it does.
+  // Optional: the imported library has no printed pages; `library` links the entry's section instead (#181).
   page: z.number().int().positive().optional(),
   text: z.string(),
   // Where the book puts it: an area's place, a place inside another, an NPC's home.

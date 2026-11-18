@@ -237,7 +237,7 @@ function wantsSuccess(bearer: Actor, roll: Roll): boolean {
   return roll.roller.side === bearer.side;
 }
 
-function matchesRoll(
+export function matchesRoll(
   bearer: Actor,
   trigger: Trigger,
   roll: Roll,
@@ -284,6 +284,7 @@ function matchesRoll(
   }
   if (rolled.edged && !roll.edged) return false;
   if (rolled.when === "failed" && roll.success) return false;
+  if (rolled.when === "succeeded" && !roll.success) return false;
   return (
     near(bearer, subject, trigger.within) && sees(bearer, subject, context)
   );

@@ -340,7 +340,9 @@ export type WeaponChange = z.infer<typeof WeaponChangeSchema>;
 // something stuck or barred to force, a wall or barricade to get through, a climb, water to swim or cross, a gap to
 // leap or balance over, a trap to disarm, something heavy to lift or shove, and a chase to get away from; and, read
 // from a check's skill, swaying someone (Persuasion, Deception, Intimidation, Performance: "influence"), seeing through
-// a lie (Insight: "truth") and dealing with an animal (Animal Handling: "beast").
+// a lie (Insight: "truth"), dealing with an animal (Animal Handling: "beast"), finding what's hidden (Perception,
+// Investigation: "hidden"), knowing about something (Arcana, History, Nature, Religion: "lore") and finding the way
+// (Survival: "way").
 export const ObstacleSchema = z.enum([
   "lock",
   "stuck",
@@ -354,6 +356,9 @@ export const ObstacleSchema = z.enum([
   "influence",
   "truth",
   "beast",
+  "hidden",
+  "lore",
+  "way",
 ]);
 export type Obstacle = z.infer<typeof ObstacleSchema>;
 
@@ -2402,8 +2407,16 @@ export const ActivationSchema = z.strictObject({
           rolls: z.array(z.enum(["attack", "save", "check"])).min(1),
           // "others" is anyone but the bearer, as Bend Luck's
           by: z.enum(["self", "ally", "selfOrAlly", "foe", "any", "others"]),
+          // "succeeded" only a roll that succeeds, as a Crystal Ball of Ominous Portent's turning it into a 1
           when: z
-            .enum(["natural1", "hit", "failed", "hitOrFailed", "any"])
+            .enum([
+              "natural1",
+              "hit",
+              "failed",
+              "hitOrFailed",
+              "succeeded",
+              "any",
+            ])
             .default("any"),
           magical: z.literal(true).optional(),
           // only a save to avoid or end one of these conditions, as Countercharm's Charmed or Frightened

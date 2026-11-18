@@ -161,7 +161,7 @@
   rarity: common
   attunement: false
   text: Reading it casts Detect Magic without a spell slot, and the scroll crumbles to dust.
-  automation: partial
+  automation: full
   spell: "srd52:spell/detect-magic"
 - id: "srd52:item/spell-scroll-magic-circle"
   name: Spell Scroll (Magic Circle)
