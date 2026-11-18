@@ -33,6 +33,7 @@ import { silencedSpells, sunlit } from "../zones.ts";
 import {
   actorOf,
   canAfford,
+  quickenedBars,
   goldFor,
   inReach,
   moveSquares,
@@ -78,6 +79,7 @@ function turnOptions(
       activation.outOfCombat ||
       action.rolled ||
       !canAfford(action, actor, stats) ||
+      quickenedBars(action, actor) ||
       goldFor(action) > (state.gold ?? 0)
     )
       continue;

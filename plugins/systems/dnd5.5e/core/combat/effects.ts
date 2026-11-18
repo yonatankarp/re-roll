@@ -8,6 +8,7 @@ import {
   type KnownAction,
   lookup,
   modifierFor,
+  onList,
   passiveModifiers,
   rerollingOnes,
   cantripTier,
@@ -20,6 +21,7 @@ import {
   scoreFloor,
   spellSaveDc,
   type Stats,
+  maybeLookup,
 } from "../stats.ts";
 import { metamagicSaves } from "../metamagic.ts";
 import { regainCap, regainEvents, shortRestFor } from "../rest.ts";
@@ -75,8 +77,8 @@ import {
   HIGHEST,
   masteredDice,
   maximized,
-  masteredTypes,
   flooredTypes,
+  masteredTypes,
   rerolledTypes,
   hitDieHealing,
   hitDieRoll,
@@ -139,7 +141,7 @@ import {
   slotRefund,
 } from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
-import { fueledDamage } from "./school.ts";
+import { fueledDamage, schoolOf, spendHitDice } from "./school.ts";
 import {
   conditionsApplied,
   legendaryResistance,
@@ -1683,9 +1685,20 @@ function reducedHit(
   );
   const wornEvents: SystemEvent[] = [];
   if (worn?.kind === "damageReduction" && amount > 0) {
+    // Burning Life Force: Hit Point Dice spent for more.
+    const burned = worn.hitDice
+      ? spendHitDice(
+          target,
+          Math.max(1, evaluateFormula(worn.hitDice, targetStats)),
+          context,
+        )
+      : null;
+    if (burned) wornEvents.push(...burned.events);
     amount = Math.max(
       0,
-      amount - rollAmount(worn.amount, targetStats, context.dice),
+      amount -
+        rollAmount(worn.amount, targetStats, context.dice) -
+        (burned?.total ?? 0),
     );
     if (worn.oncePerTurn) {
       wornEvents.push(
@@ -1968,6 +1981,92 @@ export function poolHealing(
   return { resource: pool.resource, spent, healed };
 }
 
+// A spell stopped, by Dispel Magic or a counter: a use of each `stopRegain` resource back.
+export function stopRegains(caster: Actor, stats: Stats): SystemEvent[] {
+  return stats.passives.flatMap((passive) =>
+    passive.kind === "stopRegain" &&
+    (caster.resourcesSpent[passive.resource] ?? 0) > 0
+      ? [
+          dndEvent(`${NS}:resourceRestored`, {
+            actor: caster.id,
+            resource: passive.resource,
+            amount: 1,
+          }),
+        ]
+      : [],
+  );
+}
+
+// Empowered Healing: the caster or an ally within 5 feet of it whose `empoweredHealing` use is left this turn spends
+// it, and its resource, for the healing dice to be rolled again when low.
+function empowerer(
+  caster: Actor,
+  context: Context,
+): { readonly events: SystemEvent[] } | null {
+  for (const bearer of [caster, ...allies(context.state, caster)]) {
+    if (
+      bearer.id !== caster.id &&
+      distanceFeet(bearer.position, caster.position) > 5
+    ) {
+      continue;
+    }
+    if (bearer.usedThisTurn.includes(EMPOWERED_HEALING)) continue;
+    if (hasCondition(bearer, ...INCAPACITATING) || isDown(bearer)) continue;
+    const own = deriveStats(bearer, context);
+    const passive = own.passives.find(
+      (item) => item.kind === "empoweredHealing",
+    );
+    if (passive?.kind !== "empoweredHealing") continue;
+    if (
+      (bearer.resourcesSpent[passive.resource] ?? 0) >=
+      (own.resources[passive.resource] ?? 0)
+    ) {
+      continue;
+    }
+    return {
+      events: [
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: bearer.id,
+          resource: passive.resource,
+        }),
+        dndEvent(`${NS}:oncePerTurnUsed`, {
+          actor: bearer.id,
+          key: EMPOWERED_HEALING,
+        }),
+      ],
+    };
+  }
+  return null;
+}
+const EMPOWERED_HEALING = "empoweredHealing";
+
+// What a caster's `spellHealing` passives add to the healing of a spell, cast with a slot of this level unless it's a
+// free cast or one from an item.
+function spellHealing(
+  spell: string,
+  sourceId: string,
+  stats: Stats,
+  context: Context,
+  slotLevel: number | undefined,
+): number {
+  const slotted =
+    slotLevel !== undefined &&
+    !/:free(:|$)/.test(sourceId) &&
+    castFrom(sourceId) === null;
+  const known = maybeLookup(context, SpellSchema, spell);
+  return stats.passives.reduce(
+    (sum, passive) =>
+      passive.kind === "spellHealing" &&
+      (!passive.slot || slotted) &&
+      (!passive.list || onList(spell, known, passive.list, context))
+        ? sum +
+          evaluateFormula(passive.bonus, stats) +
+          (passive.perSlot && slotted ? slotLevel : 0)
+        : sum,
+    0,
+  );
+}
+
 export function leafEvents(
   effects: readonly LeafEffect[],
   sourceId: string,
@@ -2063,9 +2162,13 @@ export function leafEvents(
           0,
           (effect.half ? Math.floor(max / 2) : max) - Math.max(target.hp, 0),
         );
-        // Circle of Mortality: dice healing a creature at 0 Hit Points give their highest faces.
+        // Circle of Mortality: dice healing a creature at 0 Hit Points give their highest faces, and Supreme
+        // Healing's for any spell or Channel Divinity.
+        const spell = spellOfSource(sourceId);
+        const divine = sourceId.includes("channel-divinity");
         const dice =
-          target.hp <= 0 && hasPassive(stats, "maxHealingAtZero")
+          (target.hp <= 0 && hasPassive(stats, "maxHealingAtZero")) ||
+          ((spell !== null || divine) && hasPassive(stats, "maxHealingDice"))
             ? HIGHEST
             : healDice;
         const pool = effect.pool
@@ -2088,12 +2191,27 @@ export function leafEvents(
               : []),
           );
         }
-        const rolled = effect.full
-          ? max
-          : effect.halfMax
-            ? Math.floor(max / 2)
-            : (pool?.healed ?? rollAmount(effect.amount, stats, dice)) +
-              (effect.perSlot && slotLevel ? effect.perSlot * slotLevel : 0);
+        // Empowered Healing: a Sorcery Point rolls a spell's low healing dice again, once a turn.
+        const empowering =
+          spell !== null && !effect.full && !pool && effect.amount.dice
+            ? empowerer(caster, context)
+            : null;
+        if (empowering) events.push(...empowering.events);
+        const amount = empowering
+          ? { ...effect.amount, reroll: 1 }
+          : effect.amount;
+        const rolled =
+          (effect.full
+            ? max
+            : effect.halfMax
+              ? Math.floor(max / 2)
+              : (pool?.healed ?? rollAmount(amount, stats, dice)) +
+                (effect.perSlot && slotLevel
+                  ? effect.perSlot * slotLevel
+                  : 0)) +
+          (spell === null
+            ? 0
+            : spellHealing(spell, sourceId, stats, context, slotLevel));
         // Fortified Health: once a turn, healing gives the Constitution modifier more.
         const fortified = deriveStats(target, context).passives.find(
           (passive) => passive.kind === "healBonus",
@@ -2589,7 +2707,9 @@ export function leafEvents(
           (["petrified", "unconscious"].includes(effect.condition) ||
             !deriveStats(target, context).passives.some(
               (passive) =>
-                passive.kind === "unshakableFocus" && !passive.spells,
+                passive.kind === "unshakableFocus" &&
+                !passive.spells &&
+                !passive.schools,
             ))
         ) {
           events.push(
@@ -2728,18 +2848,48 @@ export function leafEvents(
         break;
       }
       case "dispel": {
-        events.push(
-          ...dispelEvents(
-            target,
-            effect.maxLevel,
-            context.state,
-            context,
-            effect.hostile,
-            effect.check && stats.spellAbility
-              ? (dc) => spellcastingCheck(caster, stats, dc, context)
-              : undefined,
-          ),
+        // Spell Breaker: the Proficiency Bonus on the check, and the slot back when nothing ends.
+        const breaker = hasPassive(stats, "spellBreaker");
+        const ended = dispelEvents(
+          target,
+          effect.maxLevel,
+          context.state,
+          context,
+          effect.hostile,
+          effect.check && stats.spellAbility
+            ? (dc) =>
+                spellcastingCheck(
+                  caster,
+                  stats,
+                  dc - (breaker ? stats.proficiency : 0),
+                  context,
+                )
+            : undefined,
         );
+        events.push(...ended);
+        const stopped = ended.some(
+          (item) =>
+            item.kind === `${NS}:effectEnded` ||
+            item.kind === `${NS}:concentrationEnded`,
+        );
+        const spell = spellOfSource(sourceId);
+        // Power Surge: a spell ended gives a surge back.
+        if (stopped) events.push(...stopRegains(caster, stats));
+        if (
+          breaker &&
+          !stopped &&
+          slotLevel !== undefined &&
+          spell !== null &&
+          !/:free(:|$)/.test(sourceId)
+        ) {
+          events.push(
+            dndEvent(`${NS}:resourceRestored`, {
+              actor: caster.id,
+              resource: `slot:${String(slotLevel)}`,
+              amount: 1,
+            }),
+          );
+        }
         // Shutdown: the dispelled construct may fall Unconscious.
         const shutdown = deriveStats(target, context).passives.find(
           (passive) => passive.kind === "dispelShutdown",
@@ -3068,6 +3218,31 @@ export function leafEvents(
           ...sendAwayEvents(effect, sourceId, caster, target, context),
         );
         break;
+      case "allyHeal": {
+        const hurt = allies(context.state, caster)
+          .filter(
+            (item) =>
+              item.id !== target.id &&
+              !isDead(item) &&
+              distanceFeet(item.position, caster.position) <= effect.within,
+          )
+          .map((item) => ({ item, max: deriveStats(item, context).maxHp }))
+          .filter(({ item, max }) => item.hp < max)
+          .sort((a, b) => a.item.hp - a.max - (b.item.hp - b.max))[0];
+        if (hurt) {
+          events.push(
+            dndEvent(`${NS}:healed`, {
+              actor: hurt.item.id,
+              amount: Math.min(
+                rollAmount(effect.amount, stats, healDice),
+                hurt.max - Math.max(hurt.item.hp, 0),
+              ),
+              max: hurt.max,
+            }),
+          );
+        }
+        break;
+      }
       case "foesTake": {
         // Deflecting Shroud: the nearest foes the caster sees in range.
         const { range, creatures, damage } = effect;
@@ -3904,6 +4079,7 @@ export function rollSave(
   disadvantage = false, // from the caster, as with Heightened Spell
   advantage = false, // from the spell itself, as Modify Memory gives a foe it fights
   source?: SaveSource, // what it's against, for Dragon Scale Mail's Advantage against a dragon's breath
+  penalty = 0, // taken off the total, as Tenacious Spell's 1d6
 ): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
@@ -3993,7 +4169,8 @@ export function rollSave(
     saveBonus(stats, ability) +
     rollBonus(target, "saves", context, undefined, ability) +
     preyBonus(target, source?.caster, context) +
-    (ability === "dex" ? cover : 0);
+    (ability === "dex" ? cover : 0) -
+    penalty;
   const least = scoreFloor(stats, ability); // Indomitable Might
   // Reactions to the roll before it lands, as Bountiful Luck or Portent (combat/reactions.ts).
   const judge = (natural: number, bonus: number) => ({
@@ -4262,6 +4439,8 @@ export function resolveAction(
         action,
         actor,
         stats,
+        context,
+        slotLevel ?? action.spellLevel ?? 0,
       )
     : aimedAt;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
@@ -4706,7 +4885,9 @@ export function resolveAction(
                           6,
                       )
                   : effect.feet,
-                effect.movement,
+                effect.halfSpeed
+                  ? Math.floor(deriveStats(target, context).speed / 2)
+                  : effect.movement,
                 context,
                 effect.provokes,
                 effect.beside === undefined
@@ -4814,6 +4995,29 @@ export function resolveAction(
         modifierFor(stats, "cha"),
       );
       const { heightened } = careful;
+      // Heightened Spell: the target's later saves against a spell held by Concentration are at Disadvantage too.
+      if (heightened !== undefined && action.concentrates) {
+        events.push(
+          dndEvent(`${NS}:effectAdded`, {
+            actor: heightened,
+            effect: {
+              sourceId: action.id,
+              casterId: actor.id,
+              modifier: {
+                kind: "disadvantage",
+                on: "saves",
+                casterSpells: true,
+              },
+              ends: "concentration",
+            },
+          }),
+        );
+      }
+      // Magical Ambush: an Invisible caster's spell is saved against with Disadvantage.
+      const ambushing =
+        action.spellLevel !== null &&
+        hasCondition(actor, "invisible") &&
+        hasPassive(stats, "magicalAmbush");
       const banded = pairedBandSpares(action, actor, stats, targets, context);
       events.push(...banded.events);
       const spared = new Set([...careful.spared, ...banded.spared]);
@@ -4881,9 +5085,13 @@ export function resolveAction(
                 conditionsApplied(resolution.onFail),
                 heightened === target.id ||
                   edges.includes("disadvantage") ||
+                  ambushing ||
                   stormStrength(action, stats),
                 resolution.advantage === true || edges.includes("advantage"),
                 source,
+                action.saveDice
+                  ? rollDiceNotation(action.saveDice, context.dice)
+                  : 0,
               );
         events.push(...saveEvents);
         const resisted = rolledSave
@@ -5653,14 +5861,21 @@ function immuneToSpell(
 }
 
 // Evocation Sculptor: an area spell passes over the caster and up to that many of its side, who save and take nothing.
+// Sculpt Spells: only an Evocation, sparing 1 plus the spell's level of the caster's side.
+// shortcut: the spared are the caster's side, the ones it would pick, and they're spared the whole spell.
 function sculpted(
   targets: readonly Actor[],
   action: KnownAction,
   actor: Actor,
   stats: ReturnType<typeof deriveStats>,
+  context: Context,
+  slotLevel: number,
 ): readonly Actor[] {
+  const school = schoolOf(action.id, context);
   const sculptor = stats.passives.find(
-    (passive) => passive.kind === "sculptor",
+    (passive) =>
+      passive.kind === "sculptor" &&
+      (!passive.schools || passive.schools.some((item) => item === school)),
   );
   if (
     sculptor?.kind !== "sculptor" ||
@@ -5668,11 +5883,12 @@ function sculpted(
   ) {
     return targets;
   }
+  const most = sculptor.creatures + (sculptor.perLevel ? slotLevel : 0);
   let spared = 0;
   return targets.filter((target) => {
     if (target.side !== actor.side) return true;
-    if (target.id === actor.id) return false;
+    if (target.id === actor.id && !sculptor.perLevel) return false;
     spared += 1;
-    return spared > sculptor.creatures;
+    return spared > most;
   });
 }

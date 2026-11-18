@@ -449,7 +449,10 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
       [attack(PLAYER_ACTOR, weaponOf(paladin), "a")],
       dice(),
       (decision) =>
-        decision.options.find((item) => item.id.startsWith(smite))?.id ??
+        // The slot's cast, not Paladin's Smite's free one.
+        decision.options.find(
+          (item) => item.id.startsWith(smite) && !item.id.includes(":free"),
+        )?.id ??
         decision.options[0]?.id ??
         "",
     );

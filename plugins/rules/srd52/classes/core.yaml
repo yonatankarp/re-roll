@@ -98,6 +98,7 @@
   weapons: [simple]
   armor: [light, medium, shield]
   spellcasting: { ability: wis }
+  swaps: { cantrips: levelUp, spells: prepare }
   levels:
     - level: 1
       grants: ["srd52:feature/spellcasting", "srd52:feature/divine-order"]
@@ -132,6 +133,7 @@
   weapons: [simple]
   armor: []
   spellcasting: { ability: int }
+  swaps: { cantrips: longRest, spells: prepare }
   levels:
     - level: 1
       grants:

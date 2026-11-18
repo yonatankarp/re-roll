@@ -74,8 +74,19 @@ import {
 } from "./schemas.ts";
 import { featureRules, grantedSpells } from "./feature-rules.ts";
 import { type Caster, multiclassSlots } from "./multiclass.ts";
-import { holdsConcentration, withMetamagic } from "./metamagic.ts";
+import {
+  freeOption,
+  holdsConcentration,
+  keepsHidden,
+  withMetamagic,
+} from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
+import {
+  CAST_OPTION_PREFIX,
+  castOptionsOf,
+  waitingOptions,
+  withCastOptions,
+} from "./cast-options.ts";
 import { withWeaponRiders } from "./weapon-riders.ts";
 import {
   GRANTED_PREFIX,
@@ -110,6 +121,24 @@ export function lookup<T>(
   return bySchema.get(schema) as T;
 }
 
+// A content entry parsed once, as `lookup` does, or undefined when it's missing or doesn't fit the schema.
+const maybeParsed = new WeakMap<object, Map<z.ZodType, unknown>>();
+export function maybeLookup<T>(
+  access: Pick<ContentAccess, "content">,
+  schema: z.ZodType<T>,
+  id: string,
+): T | undefined {
+  const entry = access.content(id);
+  if (!entry || typeof entry !== "object") return undefined;
+  let bySchema = maybeParsed.get(entry);
+  if (!bySchema) {
+    bySchema = new Map<z.ZodType, unknown>();
+    maybeParsed.set(entry, bySchema);
+  }
+  if (!bySchema.has(schema)) bySchema.set(schema, schema.safeParse(entry).data);
+  return bySchema.get(schema) as T | undefined;
+}
+
 export function abilityModifier(score: number): number {
   return Math.floor((score - 10) / 2);
 }
@@ -140,6 +169,7 @@ export interface KnownAction {
     readonly breaks?: string; // the item a failure destroys
   };
   readonly onceKeys?: readonly string[]; // once-a-turn uses its cast spends, as a `spellDamage` bonus (combat/actions.ts)
+  readonly saveDice?: string; // dice taken off each target's first save, as Modify Magic's Tenacious Spell (cast-options.ts)
 }
 
 export interface Stats {
@@ -472,7 +502,13 @@ function freeCastActions(
                   .map((cost) =>
                     quick(how) && cost === "action" ? "bonusAction" : cost,
                   ),
-                ...(unlimited ? [] : [{ resource: id }]),
+                ...(unlimited
+                  ? []
+                  : [
+                      typeof how === "object" && how.perLevel && slot > 1
+                        ? { resource: id, count: slot }
+                        : { resource: id },
+                    ]),
               ],
             },
             spellLevel: slot,
@@ -1197,6 +1233,7 @@ function collectFeatureData(
   classLevels: Readonly<Record<string, number>> = {},
   variants: Readonly<Record<string, readonly string[]>> = {},
   swaps: Readonly<Record<string, readonly string[]>> = {},
+  grantedBy: ReadonlyMap<string, string> = new Map(),
 ): {
   passives: Passive[];
   actions: KnownAction[];
@@ -1204,13 +1241,21 @@ function collectFeatureData(
   spells: string[];
   free: [string, FreeCast][];
   retype: Record<string, DamageType>;
+  abilities: ReadonlyMap<string, Ability>;
+  gated: readonly NonNullable<Feature["whileActive"]>[];
 } {
   const passives: Passive[] = [];
   const actions: KnownAction[] = [];
   const resources: Feature["resources"] = [];
-  const spells = featureIds.flatMap((id) => grantedSpells(id, level));
+  // A class or subclass feature's spells come by that class's level, as a subclass table's "Cleric Level".
+  const levelFor = (id: string) =>
+    classLevels[grantedBy.get(id) ?? ""] ?? level;
+  const spells = featureIds.flatMap((id) => grantedSpells(id, levelFor(id)));
   const free: [string, FreeCast][] = [];
   const retype: Record<string, DamageType> = {};
+  const ownSpells = new Map<string, readonly string[]>(); // each feature's own spells, by feature
+  const gated: NonNullable<Feature["whileActive"]>[] = []; // passives only while an effect is on the bearer
+  const abilities = new Map<string, Ability>(); // a feature's spells cast with its own ability
   // Activations a later feature's variant takes the place of, by the feature they're on (`replaces`).
   const replaced = new Map<string, Set<string>>();
   for (const id of featureIds) {
@@ -1244,12 +1289,13 @@ function collectFeatureData(
     if ((feature.fromLevel ?? 1) > level) continue;
     Object.assign(retype, feature.retype);
     passives.push(...feature.passives);
+    if (feature.whileActive) gated.push(feature.whileActive);
     resources.push(...feature.resources);
     const own: string[] = [];
     for (const [from, ids] of Object.entries(
       swappedSpells(id, feature, swaps, access) ?? {},
     )) {
-      if (Number(from) > level) continue;
+      if (Number(from) > levelFor(id)) continue;
       own.push(...ids);
       for (const spell of ids) {
         const how = freeCastOf(feature.freeCast, spell);
@@ -1257,6 +1303,10 @@ function collectFeatureData(
       }
     }
     spells.push(...own);
+    ownSpells.set(id, own);
+    if (feature.spellAbility) {
+      for (const spell of own) abilities.set(spell, feature.spellAbility);
+    }
     const { preparedWith } = feature;
     const prepared =
       preparedWith && feats.has(preparedWith.feat) ? preparedWith : undefined;
@@ -1295,7 +1345,36 @@ function collectFeatureData(
       });
     });
   }
-  return { passives, actions, resources, spells, free, retype };
+  for (const id of featureIds) {
+    const from = maybeLookup(access, FeatureSchema, id)?.freeCastsFrom;
+    if (!from) continue;
+    for (const spell of ownSpells.get(from.feature) ?? []) {
+      const known = maybeLookup(access, SpellSchema, spell);
+      const level = known?.level;
+      if (from.schools && !(known && from.schools.includes(known.school))) {
+        continue;
+      }
+      if (level) {
+        free.push([
+          spell,
+          {
+            resource: from.resource,
+            ...(from.perLevel ? { perLevel: true as const } : {}),
+          },
+        ]);
+      }
+    }
+  }
+  return {
+    passives,
+    actions,
+    resources,
+    spells,
+    free,
+    retype,
+    abilities,
+    gated,
+  };
 }
 
 // An attack with `emptyHanded` dice rolls them while the bearer holds no weapon or Shield, as Unarmed Fighting's d8.
@@ -1326,66 +1405,299 @@ function emptyHanded(
   });
 }
 
-// Spells with a `spellDamage` bonus added to their damage, while its once-a-turn use is left.
+// Potent Cantrip: a damaging cantrip's miss or successful save still deals half its damage.
+function withPotentCantrips(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+): KnownAction[] {
+  if (!passives.some((passive) => passive.kind === "potentCantrip")) {
+    return [...actions];
+  }
+  return actions.map((action) => {
+    const { resolution } = action.activation;
+    if (
+      action.spellLevel !== 0 ||
+      spellOfSource(action.id) === null ||
+      resolution.damage.length === 0
+    ) {
+      return action;
+    }
+    const potent =
+      resolution.kind === "save" && resolution.onSuccessDamage === "none"
+        ? { ...resolution, onSuccessDamage: "half" as const }
+        : resolution.kind === "attack" && !resolution.missDamage
+          ? { ...resolution, missDamage: "half" as const }
+          : resolution;
+    return potent === resolution
+      ? action
+      : { ...action, activation: { ...action.activation, resolution: potent } };
+  });
+}
+
+// Whether this cast needs no components (`silentCasting`, or Subtle Spell waiting on it), so nobody sees it cast.
+export function castsSilently(
+  actor: Actor,
+  action: KnownAction,
+  stats: Pick<Stats, "passives">,
+  access: ContentAccess,
+): boolean {
+  if (keepsHidden(actor, action.id)) return true;
+  const spellId = spellOfSource(action.id);
+  if (spellId === null) return false;
+  const spell = maybeLookup(access, SpellSchema, spellId);
+  return stats.passives.some(
+    (passive) =>
+      passive.kind === "silentCasting" &&
+      (!passive.schools || (spell && passive.schools.includes(spell.school))) &&
+      (!passive.list || onList(spellId, spell, passive.list, access)) &&
+      (!passive.spells || passive.spells.includes(spellId)) &&
+      (!passive.slot || action.activation.cost.includes("slot")) &&
+      (!passive.via ||
+        (/:free(:|$)/.test(action.id) &&
+          action.activation.cost.some(
+            (cost) =>
+              typeof cost === "object" &&
+              "resource" in cost &&
+              cost.resource === passive.via,
+          ))),
+  );
+}
+
+// Spells whose damage may take other types (`spellTypes`), the least resisted dealt.
+function withSpellTypes(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+  actor: Actor,
+  access: ContentAccess,
+  usesLeft: (resource: string) => boolean,
+): KnownAction[] {
+  const changes = passives.flatMap((passive, index) =>
+    passive.kind === "spellTypes" &&
+    !(
+      passive.oncePerTurn &&
+      actor.usedThisTurn.includes(`spellTypes:${String(index)}`)
+    ) &&
+    !(passive.resource && !usesLeft(passive.resource))
+      ? [{ passive, key: `spellTypes:${String(index)}` }]
+      : [],
+  );
+  if (changes.length === 0) return [...actions];
+  return actions.map((action) => {
+    const spellId = spellOfSource(action.id);
+    const { resolution } = action.activation;
+    if (spellId === null || resolution.damage.length === 0) return action;
+    const spell = maybeLookup(access, SpellSchema, spellId);
+    const fitting = changes.filter(
+      ({ passive }) =>
+        !passive.list || onList(spellId, spell, passive.list, access),
+    );
+    if (fitting.length === 0) return action;
+    const add = fitting.flatMap(({ passive }) => passive.add);
+    const damage = resolution.damage.map((item) => ({
+      ...item,
+      types: [...new Set([...(item.types ?? [item.type]), ...add])],
+    }));
+    const keys = fitting.flatMap(({ passive, key }) =>
+      passive.oncePerTurn ? [key] : [],
+    );
+    const spends = fitting.flatMap(({ passive }) =>
+      passive.resource ? [{ resource: passive.resource }] : [],
+    );
+    return {
+      ...action,
+      activation: {
+        ...action.activation,
+        cost: [...action.activation.cost, ...spends],
+        resolution: { ...resolution, damage },
+      },
+      ...(keys.length > 0
+        ? { onceKeys: [...(action.onceKeys ?? []), ...keys] }
+        : {}),
+    };
+  });
+}
+
+// Spells cast with a Bonus Action in place of an action (`castsAs`), and attack spells reaching farther
+// (`spellRange`).
+function withCastsAs(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+): KnownAction[] {
+  const farther = passives.reduce(
+    (sum, passive) =>
+      passive.kind === "spellRange" ? sum + passive.feet : sum,
+    0,
+  );
+  const reached =
+    farther === 0
+      ? actions
+      : actions.map((action) => {
+          const { targeting, resolution } = action.activation;
+          return spellOfSource(action.id) !== null &&
+            resolution.kind === "attack" &&
+            "range" in targeting &&
+            typeof targeting.range === "number" &&
+            targeting.range >= 10
+            ? {
+                ...action,
+                activation: {
+                  ...action.activation,
+                  targeting: { ...targeting, range: targeting.range + farther },
+                },
+              }
+            : action;
+        });
+  return castsAs(reached, passives);
+}
+
+function castsAs(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+): KnownAction[] {
+  const quick = passives.flatMap((passive) =>
+    passive.kind === "castsAs" ? passive.spells : [],
+  );
+  if (quick.length === 0) return [...actions];
+  return actions.map((action) => {
+    const spell = spellOfSource(action.id);
+    return spell !== null && quick.includes(spell)
+      ? {
+          ...action,
+          activation: {
+            ...action.activation,
+            cost: action.activation.cost.map((cost) =>
+              cost === "action" ? "bonusAction" : cost,
+            ),
+          },
+        }
+      : action;
+  });
+}
+
+// Spells that reach more creatures (`extraTarget`).
+function withExtraTargets(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+): KnownAction[] {
+  const extra = passives.filter((passive) => passive.kind === "extraTarget");
+  if (extra.length === 0) return [...actions];
+  return actions.map((action) => {
+    const spell = spellOfSource(action.id);
+    const { targeting } = action.activation;
+    const more = extra.reduce(
+      (sum, item) =>
+        spell !== null && item.spells.includes(spell)
+          ? sum + item.creatures
+          : sum,
+      0,
+    );
+    return more > 0 && "creatures" in targeting
+      ? {
+          ...action,
+          activation: {
+            ...action.activation,
+            targeting: { ...targeting, creatures: targeting.creatures + more },
+          },
+        }
+      : action;
+  });
+}
+
+// Spells with a `spellDamage` bonus added to their damage, while its once-a-turn use (and its resource) is left.
 function withSpellDamage(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
   actor: Actor,
+  access: ContentAccess,
+  usesLeft: (resource: string) => boolean,
 ): KnownAction[] {
   const bonuses = passives.flatMap((passive, index) =>
     passive.kind === "spellDamage" &&
     !(
       passive.oncePerTurn &&
       actor.usedThisTurn.includes(`spellDamage:${String(index)}`)
-    )
+    ) &&
+    !(passive.resource && !usesLeft(passive.resource))
       ? [{ passive, key: `spellDamage:${String(index)}` }]
       : [],
   );
   if (bonuses.length === 0) return [...actions];
   return actions.map((action) => {
-    if (action.spellLevel === null || !action.id.startsWith("spell:")) {
-      return action;
-    }
-    const spellId = action.id.slice("spell:".length).replace(/:free$/, "");
-    let { resolution } = action.activation;
+    const spellId = spellOfSource(action.id);
+    if (action.spellLevel === null || spellId === null) return action;
+    const spell = maybeLookup(access, SpellSchema, spellId);
+    let { resolution, cost } = action.activation;
     const keys: string[] = [];
     for (const { passive, key } of bonuses) {
       if (passive.spells && !passive.spells.includes(spellId)) continue;
+      if (passive.schools && !(spell && passive.schools.includes(spell.school)))
+        continue;
+      if (passive.list && !onList(spellId, spell, passive.list, access))
+        continue;
+      if (passive.slot && !cost.includes("slot")) continue;
       const at = resolution.damage.findIndex(
         (item) => !passive.types || passive.types.includes(item.type),
       );
       const entry = resolution.damage[at];
       if (!entry) continue;
-      const damage = resolution.damage.map((item, index) =>
-        index === at
+      const { bonus, dice } = passive;
+      // Damage of its own, with dice or in its own `type`, as Alchemical Eruption's 2d8 Force or Power Surge's Force.
+      const apart = dice !== undefined || passive.type !== undefined;
+      const raised = resolution.damage.map((item, index) =>
+        index === at && bonus && !apart
           ? {
               ...item,
               amount: {
                 ...item.amount,
                 bonus: {
-                  base: (item.amount.bonus?.base ?? 0) + passive.bonus.base,
-                  add: [
-                    ...(item.amount.bonus?.add ?? []),
-                    ...passive.bonus.add,
-                  ],
+                  base: (item.amount.bonus?.base ?? 0) + bonus.base,
+                  add: [...(item.amount.bonus?.add ?? []), ...bonus.add],
+                  ...(bonus.min === undefined ? {} : { min: bonus.min }),
                 },
               },
             }
           : item,
       );
+      const damage = apart
+        ? [
+            ...raised,
+            {
+              amount: {
+                ...(dice ? { dice } : {}),
+                ...(bonus ? { bonus } : {}),
+              },
+              type: passive.type ?? entry.type,
+            },
+          ]
+        : raised;
       resolution = { ...resolution, damage };
+      if (passive.resource) cost = [...cost, { resource: passive.resource }];
       if (passive.oncePerTurn) keys.push(key);
     }
     return keys.length === 0 && resolution === action.activation.resolution
       ? action
       : {
           ...action,
-          activation: { ...action.activation, resolution },
+          activation: { ...action.activation, resolution, cost },
           ...(keys.length > 0
             ? { onceKeys: [...(action.onceKeys ?? []), ...keys] }
             : {}),
         };
   });
+}
+
+// Whether a spell is on a class's list: the spell names the class, or the class's chapter names the spell.
+export function onList(
+  spellId: string,
+  spell: Spell | undefined,
+  list: string,
+  access: ContentAccess,
+): boolean {
+  return (
+    (spell?.classes.includes(list) ?? false) ||
+    (maybeLookup(access, ClassSchema, list)?.spellList?.includes(spellId) ??
+      false)
+  );
 }
 
 // A feature's activations with the effects other features ride on them, as Tactical Shift's move on Second Wind.
@@ -1941,6 +2253,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const swaps = actor.swaps ?? {};
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
+  const grantedBy = new Map<string, string>(); // the class whose level granted a feature
+  const answerAbilities = new Map<string, Ability>(); // spells a class choice gives with its own ability
   const variants: Record<string, string[]> = {}; // the variants picked, by feature
   // A feat picked in place of the background's, as a Dark Gift for Haunted One, is in the first level's answers.
   const replaced =
@@ -1973,7 +2287,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (!levelData) {
       throw new Error(`${entry.classId} has no level ${String(classLevel)}`);
     }
-    for (const id of levelData.grants) featureIds.add(id);
+    for (const id of levelData.grants) {
+      featureIds.add(id);
+      grantedBy.set(id, entry.classId);
+    }
     scaling = { ...scaling, ...levelData.scaling };
     for (const answer of entry.answers) {
       if (answer.kind === "skills") {
@@ -1988,6 +2305,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           knownSpells.add(spell);
           spellClass.set(spell, entry.classId);
           if (answer.freeCast) freeAlso(spell, answer.freeCast);
+          if (answer.ability) answerAbilities.set(spell, answer.ability);
         }
       } else if (answer.kind === "features") {
         for (const id of answer.values) featureIds.add(id);
@@ -2012,7 +2330,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       subclass?.class === entry.classId
         ? subclass.levels.find((item) => item.level === classLevel)
         : undefined;
-    for (const id of subclassLevel?.grants ?? []) featureIds.add(id);
+    for (const id of subclassLevel?.grants ?? []) {
+      featureIds.add(id);
+      grantedBy.set(id, entry.classId);
+    }
     for (const ability of raisedByFeat(entry.answers, access)) {
       raisedSaves.add(ability);
     }
@@ -2051,9 +2372,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   );
   // A multiclass casts with the class it has the most levels in, the first taken on a tie.
   // shortcut: every spell uses that one ability, give each its own class's once Stats holds more than one.
-  const [caster] = classes
-    .filter((def) => def.spellcasting)
+  // A subclass's Spellcasting counts for its class, as an Eldritch Knight's for a Fighter.
+  const casting = (def: ClassDef) =>
+    def.spellcasting ??
+    (subclass?.class === def.id ? subclass.spellcasting : undefined);
+  const [casterClass] = classes
+    .filter((def) => casting(def))
     .sort((a, b) => (classLevels[b.id] ?? 0) - (classLevels[a.id] ?? 0));
+  const caster = casterClass && { spellcasting: casting(casterClass) };
   const trained = new Set<string>(classes.flatMap((def) => def.armor));
   for (const id of featIds) {
     if (id.endsWith("lightly-armored")) trained.add("light").add("shield");
@@ -2118,6 +2444,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
+  // An effect raising the bearer's spell save DC, as Innate Sorcery's +1.
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "bonus" && modifier.to === "spellDc") {
+      magic.spellDc += modifier.amount.bonus?.base ?? 0;
+    }
+  }
   const fromFeatures = collectFeatureData(
     access,
     [...featureIds],
@@ -2127,7 +2459,18 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     classLevels,
     variants,
     swaps,
+    grantedBy,
   );
+  // A feature's passives that hold only while an effect of its activations is on the bearer (`whileActive`).
+  for (const gate of fromFeatures.gated) {
+    if (
+      actor.activeEffects.some(({ sourceId }) =>
+        gate.features.some((id) => sourceId.startsWith(`feature:${id}:`)),
+      )
+    ) {
+      fromFeatures.passives.push(...gate.passives);
+    }
+  }
   for (const pick of latePicks(
     swaps,
     new Set([...featIds, ...(replaced ? [] : [background.feat])]),
@@ -2186,13 +2529,17 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         !passive.whileAspect ||
         hasAspect(actor, passive.whileAspect)),
   );
-  const castingAbility = featSpellAbilities(
-    build,
-    replaced ? [] : [background.feat],
-    species,
-    access,
-    swaps,
-  );
+  const castingAbility = new Map([
+    ...answerAbilities,
+    ...fromFeatures.abilities,
+    ...featSpellAbilities(
+      build,
+      replaced ? [] : [background.feat],
+      species,
+      access,
+      swaps,
+    ),
+  ]);
   const armorBases: number[] = [];
   const armorTypes: string[] = [];
   const flatBonus = magic.ac;
@@ -2514,6 +2861,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
 
   const pools = itemPools(actor, access);
+  // Whether a use of a resource is left, for the spell changes that spend one, from its flat maximum (1 when it's
+  // worked out from the bearer, as maximums are only after this).
+  const usesLeft = (id: string): boolean => {
+    const def = [...fromFeatures.resources, ...pools].find(
+      (item) => item.id === id,
+    );
+    const most = def?.max.add.length === 0 ? def.max.base : 1;
+    return (actor.resourcesSpent[id] ?? 0) < most;
+  };
   const carried = carriedWeight(actor, access);
   const capacity = carryingCapacity(
     abilities.str,
@@ -2592,35 +2948,78 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         : []),
       ...(load === 2 ? HEAVILY_ENCUMBERED : []),
     ],
-    actions: withMetamagic(
-      withInvocations(
-        withWeaponRiders(
-          withSpellDamage(
-            emptyHanded(
-              withRiders(
-                castWithVariants(actions, fromFeatures.passives, access),
-                fromFeatures.passives,
+    actions: withCastOptions(
+      withMetamagic(
+        withInvocations(
+          withWeaponRiders(
+            withSpellDamage(
+              emptyHanded(
+                withPotentCantrips(
+                  withSpellTypes(
+                    withCastsAs(
+                      withExtraTargets(
+                        withRiders(
+                          castWithVariants(
+                            actions,
+                            fromFeatures.passives,
+                            access,
+                          ),
+                          fromFeatures.passives,
+                          actor,
+                        ),
+                        fromFeatures.passives,
+                      ),
+                      fromFeatures.passives,
+                    ),
+                    [...itemPassives, ...fromFeatures.passives],
+                    actor,
+                    access,
+                    usesLeft,
+                  ),
+                  fromFeatures.passives,
+                ),
                 actor,
+                access,
               ),
+              [...itemPassives, ...fromFeatures.passives],
               actor,
               access,
+              usesLeft,
             ),
             fromFeatures.passives,
             actor,
+            access,
+            abilities,
           ),
           fromFeatures.passives,
-          actor,
-          access,
           abilities,
+          classLevels,
+          access,
+          pactWeaponId(actor, access),
         ),
-        fromFeatures.passives,
-        abilities,
-        classLevels,
-        access,
-        pactWeaponId(actor, access),
+        actor,
+        abilityModifier(abilities.cha),
+        freeOption(actor, fromFeatures.passives),
       ),
-      actor,
-      abilityModifier(abilities.cha),
+      // Only an actor with a cast option waiting looks its features over for them.
+      actor.activeEffects.some(({ sourceId }) =>
+        sourceId.startsWith(CAST_OPTION_PREFIX),
+      )
+        ? waitingOptions(
+            actor,
+            castOptionsOf(
+              [...featureIds].flatMap((id) => {
+                const feature = FeatureSchema.safeParse(
+                  access.content(id),
+                ).data;
+                return feature
+                  ? [withVariant(featureRules(feature), variants)]
+                  : [];
+              }),
+            ),
+          )
+        : [],
+      scaleActivation,
     ),
     multiattack:
       Math.max(
@@ -4069,6 +4468,33 @@ export function spellSaveDc(stats: Stats): number {
   );
 }
 
+// Effects with their `slotLevel` terms worked out for a cast with this slot.
+export function atSlotLevel<T>(value: T, slot: number): T {
+  return slotted(value, slot) as T;
+}
+
+function slotted(value: unknown, slot: number): unknown {
+  if (Array.isArray(value)) return value.map((item) => slotted(item, slot));
+  if (value === null || typeof value !== "object") return value;
+  const copy: Record<string, unknown> = Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, slotted(item, slot)]),
+  );
+  const terms: unknown[] = Array.isArray(copy.add) ? copy.add : [];
+  const isSlot = (term: unknown) =>
+    typeof term === "object" &&
+    term !== null &&
+    "kind" in term &&
+    term.kind === "slotLevel";
+  const count = terms.filter(isSlot).length;
+  return count === 0
+    ? copy
+    : {
+        ...copy,
+        base: (typeof copy.base === "number" ? copy.base : 0) + count * slot,
+        add: terms.filter((term) => !isSlot(term)),
+      };
+}
+
 export function evaluateFormula(formula: Formula, stats: Stats): number {
   let total = formula.base;
   for (const term of formula.add) {
@@ -4118,6 +4544,7 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
         );
         break;
       case "dealt": // filled in by the reaction it's part of
+      case "slotLevel": // filled in by the cast it's part of (atSlotLevel)
         break;
       default:
         term satisfies never;
@@ -4503,7 +4930,11 @@ export function rollAmount(
   diceMultiplier = 1,
 ): number {
   const notation = scaledDice(amount, stats.scaling);
-  const rolling = amount.rerollOnes ? rerollingOnes(dice) : dice;
+  const rolling = amount.highest
+    ? { ...dice, roll: (sides: number) => sides }
+    : amount.rerollOnes
+      ? rerollingOnes(dice)
+      : dice;
   const rolled = notation
     ? amount.reroll
       ? rollRerolling(notation, rolling, diceMultiplier, amount.reroll)

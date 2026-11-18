@@ -15,11 +15,13 @@ import {
   type Check,
   CheckSchema,
   EnvironmentalEffectSchema,
+  ClassSchema,
   ItemSchema,
   type LeafEffect,
   type Modifier,
   SKILL_ABILITIES,
   SpeciesSchema,
+  type Spell,
   SpellSchema,
 } from "./schemas.ts";
 import { carriedWeight, carryingCapacity } from "./carry.ts";
@@ -36,11 +38,13 @@ import {
 } from "./state.ts";
 import {
   type KnownAction,
+  type Stats,
   chargesOf,
   deriveStats,
   itemHealing,
   lookup,
   scaleActivation,
+  maybeLookup,
 } from "./stats.ts";
 import {
   canAfford,
@@ -246,10 +250,7 @@ function helps(
 // Whether the action is a spell that can be cast as a Ritual, with time to spare between fights.
 function ritual(action: KnownAction, access: ContentAccess): boolean {
   const id = spellOfSource(action.id);
-  return (
-    id !== null &&
-    SpellSchema.safeParse(access.content(id)).data?.ritual === true
-  );
+  return id !== null && maybeLookup(access, SpellSchema, id)?.ritual === true;
 }
 
 // The action with only what it costs between fights: its slot, uses and gold, not an action of a turn. A ritual
@@ -354,6 +355,67 @@ function targetsOf(
   );
 }
 
+// Each class list's level 1+ ritual spells, found once for the content.
+const ritualsByList = new WeakMap<
+  ContentAccess["content"],
+  Map<string, readonly Spell[]>
+>();
+function listRituals(list: string, access: ContentAccess): readonly Spell[] {
+  let byList = ritualsByList.get(access.content);
+  if (!byList) {
+    byList = new Map();
+    ritualsByList.set(access.content, byList);
+  }
+  const known = byList.get(list);
+  if (known) return known;
+  const named = new Set(
+    maybeLookup(access, ClassSchema, list)?.spellList ?? [],
+  );
+  const found = access.contentIds().flatMap((id) => {
+    if (!id.includes(":spell/")) return [];
+    const spell = maybeLookup(access, SpellSchema, id);
+    return spell?.ritual &&
+      spell.activation &&
+      spell.level >= 1 &&
+      (named.has(id) || spell.classes.includes(list))
+      ? [spell]
+      : [];
+  });
+  byList.set(list, found);
+  return found;
+}
+
+// Ritual spells a Ritual Adept casts from its list without having them prepared, of levels it has slots for.
+// shortcut: the spellbook is the Wizard list, as it isn't kept apart from it (swap.ts says the same).
+function ritualsOnHand(
+  stats: Stats,
+  access: ContentAccess,
+): readonly KnownAction[] {
+  const lists = stats.passives.flatMap((passive) =>
+    passive.kind === "ritualAdept" ? [passive.list] : [],
+  );
+  if (lists.length === 0) return [];
+  const highest = stats.slots.findLastIndex((count) => count > 0) + 1;
+  const known = new Set(stats.actions.map((action) => action.id));
+  return lists.flatMap((list) =>
+    listRituals(list, access).flatMap((spell): KnownAction[] =>
+      spell.activation &&
+      spell.level <= highest &&
+      !known.has(`spell:${spell.id}`)
+        ? [
+            {
+              id: `spell:${spell.id}`,
+              name: spell.name,
+              activation: spell.activation,
+              spellLevel: spell.level,
+              upcast: spell.upcast,
+            },
+          ]
+        : [],
+    ),
+  );
+}
+
 function castable(
   caster: Actor,
   state: DndState,
@@ -362,7 +424,7 @@ function castable(
 ): readonly KnownAction[] {
   if (isDead(caster) || caster.hp <= 0) return [];
   const stats = deriveStats(caster, access);
-  return stats.actions.filter(
+  return [...stats.actions, ...ritualsOnHand(stats, access)].filter(
     (action) =>
       usable(action, access) &&
       goldFor(action) <= (state.gold ?? 0) &&
@@ -474,6 +536,12 @@ function resolve(
       typeof effect.duration === "object" &&
       "concentration" in effect.duration,
   );
+  // The slot it's cast with, its own level's unless a higher one was picked, so Disciple of Life sees it.
+  const spent =
+    slot ??
+    (between(action, context).activation.cost.includes("slot")
+      ? (action.spellLevel ?? undefined)
+      : undefined);
   if (held) {
     if (caster.concentratingOn !== null)
       events.push(dndEvent(`${NS}:concentrationEnded`, { actor: caster.id }));
@@ -493,7 +561,7 @@ function resolve(
         target,
         context,
         undefined,
-        slot,
+        spent,
       ),
     );
   }

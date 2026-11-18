@@ -252,6 +252,9 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
   }),
   // The damage that set a reaction off, as Rebuke the Violent's (combat/reactions.ts takeReaction); 0 anywhere else.
   z.strictObject({ kind: z.literal("dealt") }),
+  // The level of the slot the spell is cast with, as Blessed Healer's 2 plus the slot's level (combat/school.ts
+  // castRiders); 0 anywhere else.
+  z.strictObject({ kind: z.literal("slotLevel") }),
 ]);
 
 export const FormulaSchema = z.strictObject({
@@ -271,6 +274,7 @@ export const AmountSchema = z.strictObject({
   reroll: z.number().int().min(1).optional(), // dice rolled again once when below average, as with Empowered Spell
   rerollOnes: z.literal(true).optional(), // a die that rolls 1 is rolled again and the new roll stands
   halfDice: z.literal(true).optional(), // half the dice, rounded up, as Wails from the Grave's half the Sneak Attack
+  highest: z.literal(true).optional(), // the dice count their highest numbers, as Overchannel's maximum damage
   // a die showing its highest face adds another die, at most this many more, as Sorcerous Burst's 8s up to the
   // spellcasting modifier
   explode: FormulaSchema.optional(),
@@ -366,6 +370,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
       "initiative",
       "maxHp",
       "attacksAgainst", // an attacker's roll against the bearer, as Blade Ward's -1d4 with `subtract`
+      "spellDc", // the bearer's spell save DC, as Innate Sorcery's +1 (stats.ts)
     ]),
     amount: AmountSchema,
     once: z.boolean().optional(),
@@ -399,6 +404,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     // attacksAgainst only for the effect's caster, as Lords' Alliance Agent's Reassert Honor.
     casterOnly: z.literal(true).optional(),
     skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills, as Remarkable Athlete's Athletics
+    spellAttacks: z.literal(true).optional(), // attacks only spell attacks, as Innate Sorcery's (combat/attack.ts)
     halfMove: z.literal(true).optional(), // only once it has moved no more than half its Speed this turn, as Steady Eye
   }),
   // "attackers" limits attacksAgainst to creatures of these lowercase types, as with Protection from Evil and Good.
@@ -811,6 +817,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     magical: z.literal(true).optional(),
     oncePerTurn: z.literal(true).optional(),
     able: z.literal(true).optional(),
+    // up to this many of the bearer's Hit Point Dice spent and rolled, added to `amount`, as Crown of Spellfire's
+    // Burning Life Force. shortcut: any damage once a turn, not only an attack's hit.
+    hitDice: FormulaSchema.optional(),
   }),
   // The bearer can take its spell's `granted` action, dealing this type at the save DC it was cast with (filled in
   // as it's cast), as Dragon's Breath's breath, or an item's, as a Potion of Fire Breath's, `uses` times at most.
@@ -1154,6 +1163,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     option: z.string().min(1).optional(), // as an applyCondition's, as Telekinetic Thrust's push or Prone
   }),
   z.strictObject({ kind: z.literal("note"), text: z.string() }),
+  // The caster's most hurt ally within `within` feet of it, other than the target, regains `amount`, as Blessing of
+  // Moonlight's 2d4 when a creature fails its save against the Moonbeam.
+  z.strictObject({
+    kind: z.literal("allyHeal"),
+    amount: AmountSchema,
+    within: z.number().int().min(5),
+  }),
   // The bearer teleports up to `feet` to an open square it can see, or with `movement` jumps there for that much
   // of the turn's movement (a monster's Leap), provoking Opportunity Attacks as a walk would.
   z.strictObject({
@@ -1167,6 +1183,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       })
       .optional(),
     movement: z.number().int().min(0).default(0),
+    // Paid for with half the bearer's Speed (rounded down) in place of `movement`, as Portal Jump.
+    halfSpeed: z.literal(true).optional(),
     // The target it's used on moves instead of the bearer, as a willing ally with Telekinetic Movement.
     others: z.literal(true).optional(),
     // A teleport paid for with movement that still provokes nothing, as Portal Step's.
@@ -2696,6 +2714,130 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("concentrationAdvantage"),
     whileAspect: z.string().min(1).optional(), // only with this aspect, as Wondrous Alteration's with Natural Weapons
   }),
+  // The bearer's spells that make an attack roll reach this much farther when their range is 10 feet or more, as
+  // Spell Sniper's Increased Range.
+  z.strictObject({
+    kind: z.literal("spellRange"),
+    feet: z.number().int().min(5),
+  }),
+  // A creature Charmed by one of these spells of the bearer's can't cast spells with Verbal components, as Boon of
+  // Revelry's Sing Out with Otto's Irresistible Dance (zones.ts silencedSpells).
+  z.strictObject({
+    kind: z.literal("singOut"),
+    spells: z.array(ContentIdSchema).min(1),
+  }),
+  // Once a turn, a spell the bearer casts that deals one of these types gets up to two of its Hit Point Dice, rolled,
+  // added to its damage, as Spellfire Adept's Fueled Spellfire with Radiant (combat/school.ts fueledDamage).
+  z.strictObject({
+    kind: z.literal("fueledSpell"),
+    types: z.array(DamageTypeSchema).min(1),
+  }),
+  // The healing dice of a spell cast by the bearer or an ally within 5 feet of it are rolled again once when low, for
+  // a use of `resource` once a turn, as Empowered Healing's Sorcery Point (combat/effects.ts).
+  z.strictObject({ kind: z.literal("empoweredHealing"), resource: z.string() }),
+  // Helping a dying creature to stabilize gives the bearer Heroic Inspiration, spending a use, as Arcane Undertaker's
+  // Understanding of Death (actions.ts).
+  z.strictObject({
+    kind: z.literal("stabilizeInspiration"),
+    resource: z.string(),
+  }),
+  // A spell ended with Dispel Magic, or one countered, gives a use of `resource` back, as Power Surge's surges.
+  z.strictObject({ kind: z.literal("stopRegain"), resource: z.string() }),
+  // A change the bearer can make to a spell as it casts it, paying `cost` (cast-options.ts), as Overchannel's maximum
+  // damage, Enhanced Necromancy's second target for a Channel Divinity, or Split Enchantment's level more for a use.
+  // Which spells: `spells`, `schools`, `list`'s, cast with a slot (`slot`), of levels `minLevel` to `maxLevel`, that
+  // deal damage (`damaging`), call for a save (`saving`), make neither an attack roll nor a save (`plain`), target one
+  // creature (`oneTarget`) or allies (`allies`), or reach more creatures from a higher slot (`upcastTargets`). What
+  // changes: `levels` more of its upcast, `addTargets` more creatures, `maxDamage`, Temporary Hit Points for its
+  // targets (`tempHp`), or `saveDice` taken off each target's first save. With `escalate`, every use after the first
+  // until `escalate.resource` comes back deals the caster `dice` for each slot level, one die more for each use, of
+  // `type`, ignoring Resistance and Immunity, as Overchannel's Necrotic.
+  z.strictObject({
+    kind: z.literal("castOption"),
+    label: z.string().min(1),
+    cost: z.array(CostSchema).default([]),
+    spells: z.array(ContentIdSchema).min(1).optional(),
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    list: ContentIdSchema.optional(),
+    slot: z.literal(true).optional(),
+    minLevel: z.number().int().min(0).max(9).optional(),
+    maxLevel: z.number().int().min(0).max(9).optional(),
+    damaging: z.literal(true).optional(),
+    saving: z.literal(true).optional(),
+    plain: z.literal(true).optional(),
+    oneTarget: z.literal(true).optional(),
+    allies: z.literal(true).optional(),
+    upcastTargets: z.literal(true).optional(),
+    levels: z.number().int().min(1).optional(),
+    addTargets: z.number().int().min(1).optional(),
+    maxDamage: z.literal(true).optional(),
+    tempHp: AmountSchema.optional(),
+    saveDice: DiceSchema.optional(),
+    // effects added to the failed saves its lasting area calls for, as Blessing of Moonlight's healing on Moonbeam
+    areaOnFail: z.array(LeafEffectSchema).min(1).optional(),
+    // effects on the caster as it casts, ending with the spell, as Blessing of Moonlight's faint glow
+    userEffects: z.array(LeafEffectSchema).min(1).optional(),
+    escalate: z
+      .strictObject({
+        resource: z.string().min(1),
+        dice: z.number().int().min(1),
+        die: z.number().int().min(2),
+        type: DamageTypeSchema,
+      })
+      .optional(),
+  }),
+  // The bearer's spells that deal damage may deal these types instead, the one a target resists least (DamageSchema
+  // `types`), as Psychic Spells' Psychic for Warlock spells (`list`); `oncePerTurn` once a turn, as Grave Touched's
+  // Necrotic, or `resource` spending a use, as a Prismatic Rune's charge.
+  z.strictObject({
+    kind: z.literal("spellTypes"),
+    add: z.array(DamageTypeSchema).min(1),
+    list: ContentIdSchema.optional(),
+    oncePerTurn: z.literal(true).optional(),
+    resource: z.string().min(1).optional(),
+  }),
+  // These spells, when they target creatures, reach this many more, as Words of Creation's second creature for
+  // Power Word Heal and Power Word Kill. shortcut: how near the first target the others are isn't checked.
+  z.strictObject({
+    kind: z.literal("extraTarget"),
+    spells: z.array(ContentIdSchema).min(1),
+    creatures: z.number().int().min(1).default(1),
+  }),
+  // These spells are cast with no Verbal, Somatic or Material components, so they give a hidden caster away to no one
+  // and can't be seen to be countered: of these `schools`, of `list`'s, these `spells`, only with a slot (`slot`), or
+  // only cast by spending `via` in place of a slot, as Psionic Sorcery's Sorcery Points.
+  z.strictObject({
+    kind: z.literal("silentCasting"),
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    list: ContentIdSchema.optional(),
+    spells: z.array(ContentIdSchema).min(1).optional(),
+    slot: z.literal(true).optional(),
+    via: z.string().min(1).optional(),
+  }),
+  // Dispel Magic adds the Proficiency Bonus to its check, and a slot spent on Dispel Magic or Counterspell comes back
+  // when the spell stops nothing, as Spell Breaker's (combat/effects.ts, combat/counter.ts).
+  z.strictObject({ kind: z.literal("spellBreaker") }),
+  // A spell the bearer counters gives back these dice of `resource`, as Absorb Spells' 1d4 Sorcery Points.
+  z.strictObject({
+    kind: z.literal("counterRegain"),
+    resource: z.string().min(1),
+    dice: DiceSchema,
+  }),
+  // These spells' action is a Bonus Action instead, as Spell Breaker's Dispel Magic.
+  z.strictObject({
+    kind: z.literal("castsAs"),
+    spells: z.array(ContentIdSchema).min(1),
+    cost: z.literal("bonusAction"),
+  }),
+  // While the bearer is Invisible, the saves against its spells as it casts them have Disadvantage, as Magical Ambush.
+  // shortcut: only the saves the casting asks for, not ones the spell asks for later in the turn.
+  z.strictObject({ kind: z.literal("magicalAmbush") }),
+  // The bearer's damaging cantrips deal half their damage on a miss or a successful save, as Potent Cantrip.
+  // shortcut: the cantrip's other effects still come on a miss or save only where the cantrip says so.
+  z.strictObject({ kind: z.literal("potentCantrip") }),
+  // Ritual spells on this class's list, of a level it has slots for, can be cast as Rituals between fights without
+  // being prepared, as Ritual Adept's from a Wizard's spellbook (camp.ts).
+  z.strictObject({ kind: z.literal("ritualAdept"), list: ContentIdSchema }),
   // A creature leaving the bearer's reach can be answered with a one-target spell of one action instead of an
   // Opportunity Attack, as with War Caster's Reactive Spell.
   z.strictObject({ kind: z.literal("reactiveSpell") }),
@@ -2884,6 +3026,37 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     levels: FormulaSchema,
     resource: z.string().min(1),
   }),
+  // A spell slot can be spent in a fight, with no action, for as many of `resource` back as its level, as Mystic
+  // Focus' Focus Points (class-options.ts).
+  z.strictObject({ kind: z.literal("slotToPoints"), resource: z.string() }),
+  // A Short Rest ends with one spent slot back for `resource`, its cost by `costs` (the slot's level, what it costs
+  // and the level in `class` it needs), as Mystic Focus' Recovering Spell Slots (rest.ts).
+  z.strictObject({
+    kind: z.literal("pointsToSlot"),
+    resource: z.string(),
+    class: ContentIdSchema,
+    costs: z
+      .array(
+        z.strictObject({
+          level: z.number().int().min(1).max(9),
+          points: z.number().int().min(1),
+          from: z.number().int().min(1).max(20),
+        }),
+      )
+      .min(1),
+  }),
+  // A spell the bearer casts heals this much more on each creature it heals, as Disciple of Life's 2 plus the slot's
+  // level (`perSlot`), only cast with a slot (`slot`) or of this class's list (`list`).
+  // shortcut: the bonus goes to every creature a spell heals, not to one roll, as Alchemical Savant says.
+  z.strictObject({
+    kind: z.literal("spellHealing"),
+    bonus: FormulaSchema,
+    perSlot: z.literal(true).optional(),
+    slot: z.literal(true).optional(),
+    list: ContentIdSchema.optional(),
+  }),
+  // Healing dice of the bearer's spells and Channel Divinity count as their highest faces, as Supreme Healing.
+  z.strictObject({ kind: z.literal("maxHealingDice") }),
   // Recovering slots that way also heals, as the Scarlet Spellbook's Arcane Stamina.
   z.strictObject({ kind: z.literal("recoveryHeal"), amount: AmountSchema }),
   // Each party member's first Hit Point Die spent in a Short Rest heals this much more, as Chef's Replenishing Meal.
@@ -2901,6 +3074,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("doubleMetamagic"),
     while: z.array(ContentIdSchema).min(1),
   }),
+  // While an effect of these features' activations is on the bearer, one Metamagic option a turn costs no Sorcery
+  // Points, as Arcane Apotheosis with Innate Sorcery (metamagic.ts).
+  z.strictObject({
+    kind: z.literal("freeMetamagic"),
+    while: z.array(ContentIdSchema).min(1),
+  }),
   // The bearer's spells of this type ignore Resistance to it, and a 1 on their damage dice counts as a 2, as with
   // Elemental Adept.
   z.strictObject({
@@ -2909,7 +3088,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // The bearer's spells cast with a slot need no Somatic component, as with a Spell Duelist's Trophy's Helping Hand.
   z.strictObject({ kind: z.literal("noSomatic") }),
-  // A 1 on a damage die of the bearer's spells counts as a 2, as a Robe of Thayan Arcana's Empowered Magic.
+  // A 1 on a damage die of the bearer's spells counts as a 2, as a Robe of Thayan Arcana's Empowered Magic or
+  // Spell-Fueling Armor's Potent Spellcasting.
   z.strictObject({ kind: z.literal("empoweredSpells") }),
   // Damage of these types the bearer deals ignores Resistance, as with the Boon of Irresistible Offense.
   z.strictObject({
@@ -3179,6 +3359,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("unshakableFocus"),
     // only Concentration on one of these spells, as Guided Precision's Faerie Fire
     spells: z.array(ContentIdSchema).min(1).optional(),
+    // only on a spell of these schools, as Focused Conjuration's Conjuration spells
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
   }),
   // A 1 on a damage die of this type for the bearer's spell is rolled again, as with Flames of Phlegethos.
   // Casting with a level 1-4 slot rolls a d4, and a roll equal to the slot's level keeps it, as with Boon of Spell
@@ -3294,9 +3476,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     burn: z.array(DamageSchema).optional(),
   }),
   // Its area spells spare itself and up to `creatures` others of its side, as an evoker's Evocation Sculptor.
+  // With `schools` only spells of those, and with `perLevel` the spell's level more, as Sculpt Spells' 1 plus the
+  // level of Evocation spells; the caster then counts as one of them.
   z.strictObject({
     kind: z.literal("sculptor"),
     creatures: z.number().int().min(1),
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    perLevel: z.literal(true).optional(),
   }),
   // A hydra's heads: `heads` to begin with, one dies to `damage` or more in a turn, each dead one grows `regrow` back
   // at its turn's end unless it took a `stoppedBy` type, healing `heal`. It makes one bite and, beyond the first, has
@@ -3483,14 +3669,49 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // With `school` instead, casting a spell of that school with an action and a spell slot does, as Bewitching
   // Magic's Misty Step after an Enchantment spell. With `uses`, casting one of these spells does, as Hunter's Rime's
   // Temporary Hit Points with Hunter's Mark, and `onTargets` go on the spell's targets, as its hold on the marked.
-  // With `heals`, casting a spell with a slot that restores Hit Points does, as Starry Form's Chalice, `whileAspect`
-  // only while the bearer has that aspect and `level` only between these levels in a class.
+  // With `heals`, a spell that restores Hit Points to a creature other than the caster, as Blessed Healer's own
+  // healing; `slot` only with a spell slot, and a `slotLevel` term in its effects is that slot's level.
+  // `whileAspect` only while the bearer has that aspect, as Starry Form's Chalice, and `level` only between these
+  // levels in a class.
   z.strictObject({
     kind: z.literal("castRider"),
     damage: DamageTypeSchema.optional(),
+    types: z.array(DamageTypeSchema).min(1).optional(), // a spell dealing any of these, as Heart of the Storm's
+    // `damage` to each foe within `within` feet of the caster, as Heart of the Storm's eruption, or with `one` to the
+    // most hurt of them, as Spellfire Burst's Radiant Fire; with no foe there, `otherwise` goes on the caster, as
+    // Bolstering Flames' Temporary Hit Points.
+    nearby: z
+      .strictObject({
+        within: z.number().int().min(5),
+        damage: z.array(DamageSchema).min(1),
+        one: z.literal(true).optional(),
+        otherwise: z.array(LeafEffectSchema).min(1).optional(),
+      })
+      .optional(),
+    // a spell whose cost spends this, as Spellfire Burst's Sorcery Points
+    spends: z.string().min(1).optional(),
+    cantrip: z.literal(true).optional(), // only a cantrip, as Mark of Inspiration's
+    fromFeat: ContentIdSchema.optional(), // only a spell picked for this feat, as Aberrant Surge's level 1 spell
+    // `onTargets` dispels end no spell above the slot's level, as the 2014 Arcana Domain's Spell Breaker
+    slotCaps: z.literal(true).optional(),
+    // Hit Point Dice spent and rolled, up to `count`: with `parity` an even roll gives that many Temporary Hit Points
+    // and an odd one deals it as Force damage to the most hurt foe within `within` feet (or the caster with none
+    // there), as Aberrant Surge; without, both, the Temporary Hit Points with the Constitution modifier added, as Mark
+    // of Inspiration.
+    hitDice: z
+      .strictObject({
+        count: z.number().int().min(1),
+        within: z.number().int().min(5),
+        parity: z.literal(true).optional(),
+      })
+      .optional(),
+    oncePerTurn: z.literal(true).optional(),
+    // only while the bearer has none of these features, as Spellfire Burst before Honed Spellfire takes its place
+    without: z.array(ContentIdSchema).min(1).optional(),
     school: z.array(SpellSchoolSchema).min(1).optional(),
     uses: z.array(ContentIdSchema).min(1).optional(),
     heals: z.literal(true).optional(),
+    selfToo: z.literal(true).optional(), // with `heals`, healing the caster counts too, as Starry Form's Chalice
     whileAspect: z.string().min(1).optional(),
     level: z
       .strictObject({
@@ -3499,6 +3720,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
         max: z.number().int().min(1).optional(),
       })
       .optional(),
+    mends: z.literal(true).optional(), // a spell that restores Hit Points or ends a condition, as Dispelling Recovery's
+    slot: z.literal(true).optional(),
     effects: z.array(LeafEffectSchema).default([]),
     // One of these the caster may pick once the spell is done, as Steps of the Fey's Refreshing or Taunting Step
     // (combat/school.ts): `effects` on the caster or one creature of its side within `within` feet of it, or `foes`
@@ -3624,11 +3847,21 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // A spell the bearer casts adds this to its damage: only one of `spells`, or one dealing one of `types` (the bonus
   // taking that type), and with `oncePerTurn` once a turn, as Guided Precision's Cartographer spells or Radiant Soul.
   // shortcut: the bonus goes to every target of a spell that has several, not only one.
+  // With `dice` the spell deals them too, in the damage's type or `type`, as Alchemical Eruption's 2d8 Force or Arcane
+  // Firearm's 1d8. `list` keeps it to spells on that class's list and `schools` to those schools, as Empowered
+  // Evocation's Wizard evocations; `slot` to casts with a spell slot; and `resource` spends a use each cast, while one
+  // is left, as Arcane Overload's Power Surge.
   z.strictObject({
     kind: z.literal("spellDamage"),
-    bonus: FormulaSchema,
+    bonus: FormulaSchema.optional(),
+    dice: DiceSchema.optional(),
+    type: DamageTypeSchema.optional(),
     spells: z.array(ContentIdSchema).min(1).optional(),
     types: z.array(DamageTypeSchema).min(1).optional(),
+    list: ContentIdSchema.optional(),
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    slot: z.literal(true).optional(),
+    resource: z.string().min(1).optional(),
     oncePerTurn: z.literal(true).optional(),
   }),
   // Right after a Critical Hit with a melee weapon, or one that drops a creature to 0 Hit Points, one attack with that
@@ -3732,6 +3965,7 @@ export const FreeCastSchema = z.union([
     minutes: z.number().int().min(1).optional(),
     slotLevel: z.record(z.string(), z.number().int().min(1).max(9)).optional(),
     self: z.literal(true).optional(), // cast so only on the caster, as Vampire Touched's Spider Climb
+    perLevel: z.literal(true).optional(), // as many of `resource` as the spell's level, as Psionic Sorcery's points
     // only in Dim Light or Darkness, as One with Shadows' Invisibility
     whileIn: z.enum(["shadows", "sunlight"]).optional(),
     // cast with a Bonus Action in place of an action, a cantrip too, as Spellfire Spark's Sacred Flame
@@ -3831,8 +4065,37 @@ export const FeatureSchema = ContentEntrySchema.extend({
       step: ScaleStepSchema,
     })
     .optional(),
-  // Spells it always gives, from the character level in the key.
+  // Spells it always gives, from the level in the key: the level of the class that granted it, else the character's.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // Passives it gives only while an effect of these features' activations is on the bearer, as Crown of Spellfire's
+  // Spell Avoidance while its Innate Sorcery lasts (stats.ts).
+  whileActive: z
+    .strictObject({
+      features: z.array(ContentIdSchema).min(1),
+      passives: z.array(PassiveSchema).min(1),
+    })
+    .optional(),
+  // The ability its `spells` are cast with, as Manipulate Elements' Wisdom for a Monk's Elementalism.
+  spellAbility: AbilitySchema.optional(),
+  // Its class's spell picks (and swaps) may also come from these classes' lists or these spells, as Magical Secrets'
+  // Cleric, Druid and Wizard lists or a 2014 patron's Expanded Spell List; with `cantrips` its cantrip picks too.
+  widens: z
+    .strictObject({
+      lists: z.array(ContentIdSchema).min(1).optional(),
+      spells: z.array(ContentIdSchema).min(1).optional(),
+      cantrips: z.literal(true).optional(),
+    })
+    .optional(),
+  // Each level 1+ spell of another feature's can be cast without a slot by spending `resource`, as Natural
+  // Recovery's free Circle spell once a Long Rest.
+  freeCastsFrom: z
+    .strictObject({
+      feature: ContentIdSchema,
+      resource: z.string().min(1),
+      perLevel: z.literal(true).optional(), // spending as many as the spell's level, as Psionic Sorcery
+      schools: z.array(SpellSchoolSchema).min(1).optional(), // only these, as Mind Magic's Divination spells
+    })
+    .optional(),
   // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
   spellsBySlot: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Spells by slot level, as `spellsBySlot`, given only once this feat is taken too, as a Dragonmark's Spells of the
@@ -3887,7 +4150,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
         passives: z.array(PassiveSchema).default([]),
         activations: z.array(ActivationSchema).default([]),
         resources: z.array(ResourceDefSchema).default([]),
-        // Spells it gives, from the character level in the key, as Dread Allegiance's cantrip for each of the Dead Three.
+        // Spells the pick gives, from the level in the key, as a land's Circle spells, a Vestige's domain or Dread
+        // Allegiance's cantrip for each of the Dead Three.
         spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
         // Labels of the followed feature's activations these take the place of, as Perfected Armor's bigger weapons.
         replaces: z.array(z.string().min(1)).min(1).optional(),
@@ -3914,7 +4178,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
   // Its variants follow the pick made for this feature instead of asking, as Improved Blessed Strikes'.
   follows: ContentIdSchema.optional(),
   // The variant picked can be changed outside a fight after a rest, as Hunter's Prey's (swap.ts).
-  variantSwap: z.literal("shortRest").optional(),
+  // With "longRest", only after a Long Rest, as Circle of the Land's land.
+  variantSwap: z.enum(["shortRest", "longRest"]).optional(),
   // What it gives the bearer's familiar (combat/familiar.ts): Hit Points added to its maximum when it is found,
   // worked out from the bearer's numbers, and passives and actions of its own.
   familiar: z
@@ -3981,8 +4246,9 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     // The list of the version of this feat the character took, as "the list you chose for Magic Initiate".
     listOf: ContentIdSchema.optional(),
     also: z.array(ContentIdSchema).min(1).optional(), // these too, beside the list, as Boon of Siberys' own table
-    // One of the picks can be replaced each time the character gains a level, as Magic Initiate's (swap.ts).
-    swap: z.literal("levelUp").optional(),
+    // One of the picks can be replaced each time the character gains a level, as Magic Initiate's, or with
+    // "shortRest" all of them after any rest, as Pact of the Tome's (swap.ts).
+    swap: z.enum(["levelUp", "shortRest"]).optional(),
     // As many picks as the Proficiency Bonus, made between scenes and one more as it rises, as Ritual Caster's
     // (swap.ts). Such a choice and an `ifKnown` one are never asked as the feat is taken, so old saves replay.
     grows: z.literal("proficiency").optional(),
@@ -3990,6 +4256,12 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     // Picked between scenes, only by a character who knows this spell from elsewhere, as Light Bringer's Cleric
     // cantrip in place of a Light already known.
     ifKnown: ContentIdSchema.optional(),
+    lists: z.array(ContentIdSchema).min(1).optional(), // these classes' lists too, as Magical Discoveries'
+    cantrips: z.literal(true).optional(), // cantrips too, beside spells up to `maxLevel`
+    upToSlots: z.literal(true).optional(), // `maxLevel` is the highest slot the class has at that level
+    ability: AbilitySchema.optional(), // the spells' casting ability, as Arcane Archer Lore's Intelligence
+    // only spells of the school of the one picked for that choice, as Boon of Magic School Mastery's
+    sameSchoolAs: z.string().optional(),
   }),
   // The spellcasting ability of the feat's spells, as Magic Initiate's "Intelligence, Wisdom, or Charisma".
   z.strictObject({
@@ -4016,6 +4288,17 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
 
 export type ChoiceDef = z.infer<typeof ChoiceDefSchema>;
 
+// When the picks a class's levels asked for can be changed (swap.ts): its cantrips, its prepared spells and its
+// options such as Eldritch Invocations. "levelUp" is one pick each time it gains a level, "longRest" one after each
+// Long Rest, and "prepare" any of them after each Long Rest, as a Cleric changes its list.
+const SwapWhenSchema = z.enum(["levelUp", "longRest", "prepare"]);
+export const ClassSwapsSchema = z.strictObject({
+  cantrips: SwapWhenSchema.optional(),
+  spells: SwapWhenSchema.optional(),
+  options: SwapWhenSchema.optional(),
+});
+export type ClassSwaps = z.infer<typeof ClassSwapsSchema>;
+
 const ClassLevelSchema = z.strictObject({
   level: z.number().int().min(1).max(20),
   grants: z.array(ContentIdSchema).default([]),
@@ -4034,6 +4317,7 @@ export const ClassSchema = ContentEntrySchema.extend({
   martialWeaponProperties: z.array(WeaponPropertySchema).min(1).optional(),
   armor: z.array(z.enum(["light", "medium", "heavy", "shield"])),
   spellcasting: z.strictObject({ ability: AbilitySchema }).optional(),
+  swaps: ClassSwapsSchema.optional(),
   tools: z.array(ContentIdSchema).optional(), // tool proficiencies it gives at level 1, by id, as a Rogue's Thieves' Tools
   // Spells the class's own chapter names, for a class newer than the books that print them.
   spellList: z.array(ContentIdSchema).optional(),
@@ -4048,6 +4332,15 @@ export const SubclassSchema = ContentEntrySchema.extend({
   class: ContentIdSchema,
   // Printed for the 2014 rules, whose levels don't line up with these classes, so character creation doesn't offer it.
   edition: z.literal("2014").optional(),
+  // Spellcasting the subclass gives a class without its own, from `list`'s spells, as an Eldritch Knight's Wizard
+  // spells. Its levels' `slots` and `cantrips` and `preparedSpells` scaling then ask for picks as a class's do.
+  spellcasting: z
+    .strictObject({
+      ability: AbilitySchema,
+      list: ContentIdSchema,
+      swaps: ClassSwapsSchema.optional(),
+    })
+    .optional(),
   levels: z.array(ClassLevelSchema).min(1),
 }).strict();
 export type Subclass = z.infer<typeof SubclassSchema>;
@@ -4860,6 +5153,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
     values: z.array(ContentIdSchema),
     freeCast: z.lazy(() => FreeCastSchema).optional(), // from a choice with `freeCast`
     feat: ContentIdSchema.optional(), // the feat that asked, for its spells' ability
+    ability: AbilitySchema.optional(), // from a choice with `ability`
   }),
   z.strictObject({
     kind: z.literal("features"),

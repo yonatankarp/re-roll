@@ -21,6 +21,7 @@ import {
 import { distanceFeet, type Square, squareKey, wallSet } from "./grid.ts";
 import { deriveStats, type KnownAction, type Stats } from "./stats.ts";
 import { spellOf } from "./combat/dispel.ts";
+import { spellOfSource } from "./combat/ids.ts";
 import { lightAt } from "./sight.ts";
 
 // Lasting areas on the map: what a spell leaves (Darkness, Fog Cloud, Spike Growth, Spirit Guardians, a wall), kept
@@ -629,6 +630,24 @@ export function silencedSpells(
       zone.area?.noSpells ? [zone.area.noSpells] : [],
     ),
   );
+  // Sing Out: Charmed by its caster's Otto's Irresistible Dance, it can't speak a spell.
+  const singing = actor.activeEffects.some(
+    ({ modifier, sourceId, casterId }) => {
+      const spell = spellOfSource(sourceId);
+      const caster = state.actors[casterId];
+      return (
+        modifier.kind === "condition" &&
+        modifier.condition === "charmed" &&
+        spell !== null &&
+        caster !== undefined &&
+        deriveStats(caster, access).passives.some(
+          (passive) =>
+            passive.kind === "singOut" && passive.spells.includes(spell),
+        )
+      );
+    },
+  );
+  if (singing) kinds.add("verbal");
   if (kinds.size === 0) return null;
   // A voice thrown elsewhere, as through a Spell-Slinger's Puppet, isn't silenced.
   const elsewhere = actor.activeEffects.some(
