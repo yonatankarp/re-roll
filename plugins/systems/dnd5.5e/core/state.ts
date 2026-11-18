@@ -94,6 +94,7 @@ export const FRAME_KINDS = [
   "useItem",
   "castCheck",
   "attuneSave",
+  "wardsSet", // the party's readied wards set off as a fight starts (combat/start.ts)
   "replicatePick", // the plan a replicated item is made from (gear.ts)
   "zoneTick",
   "chooseDamageType",

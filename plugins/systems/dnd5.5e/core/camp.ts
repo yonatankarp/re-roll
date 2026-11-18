@@ -96,6 +96,7 @@ const BETWEEN: ReadonlySet<LeafEffect["kind"]> = new Set([
 interface Between {
   readonly state: DndState;
   readonly here: readonly Check[] | undefined;
+  readonly fights?: boolean | undefined; // a fight can start here (SceneHere)
 }
 
 // The skill and ability a check rolls, for the modifiers that apply to it.
@@ -141,7 +142,7 @@ function modifierHelps(
   pick: readonly string[] | undefined,
   target: Actor,
   access: ContentAccess,
-  { state, here }: Between,
+  { state, here, fights }: Between,
 ): boolean {
   const player = target.id === PLAYER_ACTOR;
   switch (modifier.kind) {
@@ -175,6 +176,20 @@ function modifierHelps(
     case "checkFloor":
     case "expertise":
       break;
+    // A ward helps where a fight can start here, once; a shelter where the place harms a rest.
+    case "prepared":
+      return (
+        (here === undefined || fights === true) &&
+        !target.activeEffects.some(
+          (effect) => effect.modifier.kind === "prepared",
+        )
+      );
+    case "sheltered":
+      return (state.ambient ?? []).some((id) => {
+        const rest = EnvironmentalEffectSchema.safeParse(access.content(id))
+          .data?.rest;
+        return rest?.condition !== undefined || rest?.keepExhaustion === true;
+      });
     default:
       return false;
   }
@@ -321,6 +336,7 @@ function targetsOf(
   state: DndState,
   access: ContentAccess,
   here?: readonly Check[],
+  fights?: boolean,
 ): readonly Actor[] {
   const { targeting } = action.activation;
   const dead = "dead" in targeting && targeting.dead === true;
@@ -350,7 +366,7 @@ function targetsOf(
         effectsOf(action).some((effect) => effect.kind === "shortRest")
       ) &&
       effectsOf(action).some((effect) =>
-        helps(effect, item, access, action.spellLevel, { state, here }),
+        helps(effect, item, access, action.spellLevel, { state, here, fights }),
       ),
   );
 }
@@ -421,6 +437,7 @@ function castable(
   state: DndState,
   access: ContentAccess,
   here?: readonly Check[],
+  fights?: boolean,
 ): readonly KnownAction[] {
   if (isDead(caster) || caster.hp <= 0) return [];
   const stats = deriveStats(caster, access);
@@ -429,7 +446,7 @@ function castable(
       usable(action, access) &&
       goldFor(action) <= (state.gold ?? 0) &&
       canAfford(between(action, access), caster, stats) &&
-      targetsOf(action, caster, state, access, here).length > 0,
+      targetsOf(action, caster, state, access, here, fights).length > 0,
   );
 }
 
@@ -464,31 +481,33 @@ export function sceneCastActions(
   if (!needy && here.length === 0 && !state.ambient) return [];
   return members(state).flatMap((caster) => {
     const stats = deriveStats(caster, access);
-    return castable(caster, state, access, here).flatMap((action) => {
-      const name =
-        caster.id === PLAYER_ACTOR
-          ? action.name
-          : `${caster.name}: ${action.name}`;
-      // A ritual costs no slot, so a higher one is never worth it.
-      const slots = ritual(action, access)
-        ? []
-        : upcastSlots(action, caster, stats);
-      return [undefined, ...slots].map((slot) => ({
-        id: castId(caster.id, action.id, slot),
-        label:
-          slot === undefined
-            ? `${name}${ritual(action, access) ? " (ritual)" : ""}`
-            : `${name} (level ${String(slot)} slot)`,
-        effect: `${NS}:castBetween`,
-        args: {
-          caster: caster.id,
-          action: action.id,
-          ...(slot === undefined ? {} : { slot }),
-        },
-        // An hour's casting only where the scene leaves time to rest.
-        ...(action.activation.outOfCombat === true ? { rest: true } : {}),
-      }));
-    });
+    return castable(caster, state, access, here, scene.fights).flatMap(
+      (action) => {
+        const name =
+          caster.id === PLAYER_ACTOR
+            ? action.name
+            : `${caster.name}: ${action.name}`;
+        // A ritual costs no slot, so a higher one is never worth it.
+        const slots = ritual(action, access)
+          ? []
+          : upcastSlots(action, caster, stats);
+        return [undefined, ...slots].map((slot) => ({
+          id: castId(caster.id, action.id, slot),
+          label:
+            slot === undefined
+              ? `${name}${ritual(action, access) ? " (ritual)" : ""}`
+              : `${name} (level ${String(slot)} slot)`,
+          effect: `${NS}:castBetween`,
+          args: {
+            caster: caster.id,
+            action: action.id,
+            ...(slot === undefined ? {} : { slot }),
+          },
+          // An hour's casting only where the scene leaves time to rest.
+          ...(action.activation.outOfCombat === true ? { rest: true } : {}),
+        }));
+      },
+    );
   });
 }
 

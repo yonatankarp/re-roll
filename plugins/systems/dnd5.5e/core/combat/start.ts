@@ -8,9 +8,17 @@ import {
   initiativeSwapFrames,
   inspirationEchoes,
 } from "./reactions.ts";
-import { type Battlemap, type Loot, MonsterSchema } from "../schemas.ts";
+import { z } from "zod";
+import {
+  ActivationSchema,
+  type Battlemap,
+  type Loot,
+  MonsterSchema,
+} from "../schemas.ts";
 import {
   type EncounterOptions,
+  type Frame,
+  frameHandler,
   type SystemEvent,
   type SystemResult,
 } from "#sdk";
@@ -18,6 +26,7 @@ import {
   type Actor,
   applyDndEvent,
   dndEvent,
+  frame,
   freshActor,
   isDead,
   NS,
@@ -42,7 +51,7 @@ import {
 import { terrainOf } from "../sight.ts";
 import { lairTurns } from "../legendary.ts";
 import { type Context, hasPassive } from "./queries.ts";
-import { DAMAGE_TO_PARTY } from "./effects.ts";
+import { DAMAGE_TO_PARTY, resolveAction } from "./effects.ts";
 import { damageToPartyFor } from "../worth.ts";
 import { familiarActors, familiarFoundEvents } from "./familiar.ts";
 
@@ -117,7 +126,14 @@ export function startCombat(
   );
 
   // The story's word on surprise, such as from a Stealth check, beats the encounter's own.
-  const surprised = context.state.surprise ?? encounter.surprise;
+  // Alarm or a Faithful Hound readied in this scene: the party isn't caught unawares.
+  const alarmed = party.some((actor) =>
+    actor.activeEffects.some(
+      ({ modifier }) => modifier.kind === "prepared" && modifier.alert,
+    ),
+  );
+  const told = context.state.surprise ?? encounter.surprise;
+  const surprised = alarmed && told === "party" ? undefined : told;
   const caught = { party: "party", enemies: "enemy" }[surprised ?? "party"];
   // Zhentarim Ruffian's Family First: Heroic Inspiration held now buys the party Advantage on Initiative.
   const rallier = party.find(
@@ -319,6 +335,13 @@ export function startCombat(
     ],
     // Alert's Initiative Swap comes first. With nobody on 20 or more, the lair acts before anyone.
     frames: [
+      ...(party.some((actor) =>
+        actor.activeEffects.some(
+          ({ modifier }) => modifier.kind === "prepared",
+        ),
+      )
+        ? [frame("wardsSet", {})]
+        : []),
       ...initiativeSwapFrames(party, context),
       ...initiativeMoveFrames(party, context),
       ...(lair?.at === 0
@@ -395,3 +418,54 @@ export function initiativeRecharge(
   }
   return events;
 }
+
+// The wards the party readied in this scene go off as the fight starts: each `prepared` activation at the first foe in
+// the Initiative order (or its bearer, for one aimed at itself), and the readied effect ends.
+export const wardFrames = {
+  [`${NS}:wardsSet`]: frameHandler({
+    schema: z.object({}),
+    run: (_payload, context: Context): SystemResult => {
+      const { state } = context;
+      const order = state.combat?.order ?? [];
+      const foe = order
+        .map((id) => state.actors[id])
+        .find((item) => item !== undefined && item.side !== "party");
+      const events: SystemEvent[] = [];
+      const frames: Frame[] = [];
+      for (const actor of Object.values(state.actors)) {
+        for (const effect of actor.activeEffects) {
+          const { modifier } = effect;
+          if (modifier.kind !== "prepared") continue;
+          events.push(
+            dndEvent(`${NS}:effectEnded`, {
+              actor: actor.id,
+              sourceId: effect.sourceId,
+              casterId: effect.casterId,
+            }),
+          );
+          const activation = modifier.activation
+            ? ActivationSchema.parse(modifier.activation)
+            : undefined;
+          if (!activation) continue;
+          const self = "self" in activation.targeting;
+          const target = self ? actor : foe;
+          if (!target) continue;
+          const result = resolveAction(
+            {
+              id: effect.sourceId,
+              name: "Ward",
+              activation: { ...activation, cost: [] },
+              spellLevel: effect.level ?? null,
+            },
+            actor,
+            [target],
+            context,
+          );
+          events.push(...(result.events ?? []));
+          frames.push(...(result.frames ?? []));
+        }
+      }
+      return { events, frames };
+    },
+  }),
+};

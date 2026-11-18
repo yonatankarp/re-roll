@@ -1039,6 +1039,21 @@ export function makeJudge(context: Context, side: Actor): Judge {
     const unhealable =
       cannotHeal(target) || healingStopped(target, state, context);
     switch (effect.kind) {
+      // Teleport's getaway is worth taking only where the bot would run anyway: foes far outlasting the party.
+      case "escape": {
+        if (!state.combat?.canFlee) return 0;
+        const left = (list: readonly Actor[]) =>
+          list
+            .filter((item) => !isDown(item))
+            .reduce((sum, item) => sum + item.hp, 0);
+        const foes = Object.values(state.actors).filter(
+          (item) => item.side !== actor.side,
+        );
+        const friends = Object.values(state.actors).filter(
+          (item) => item.side === actor.side,
+        );
+        return left(foes) > 3 * left(friends) ? 100 : 0;
+      }
       // A table's rows, each by its share of the die, aimed as the row says; a channeled spirit's only its face.
       case "rollTable": {
         const table = tableOf(effect.from, context);

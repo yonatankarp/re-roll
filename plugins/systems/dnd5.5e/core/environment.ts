@@ -608,6 +608,16 @@ export function diseaseRestEvents(
   });
 }
 
+// A shelter raised round the party, as Leomund's Tiny Hut: the place's harm to a rest stays outside.
+// shortcut: one party member's shelter covers the whole party.
+function sheltered(state: DndState): boolean {
+  return Object.values(state.actors).some(
+    (actor) =>
+      actor.side === "party" &&
+      actor.activeEffects.some(({ modifier }) => modifier.kind === "sheltered"),
+  );
+}
+
 // What a disease's symptoms and the effects around the party do to its Long Rest: no Hit Points back, and Exhaustion
 // kept (runFinishRest).
 export function restHampered(
@@ -623,9 +633,10 @@ export function restHampered(
   const kept =
     held ||
     (exhausted && showing.some((symptoms) => symptoms.keepExhaustion)) ||
-    (access.state.ambient ?? []).some(
+    ((access.state.ambient ?? []).some(
       (id) => effectOf(access, id).rest?.keepExhaustion,
-    );
+    ) &&
+      !sheltered(access.state));
   return {
     keepHp: exhausted && showing.some((symptoms) => symptoms.noRestHealing),
     exhaustionFloor: kept ? actor.exhaustion : 0,
@@ -661,6 +672,7 @@ export function ambientRestEvents(
     }
     const { rest } = effect;
     if (!rest) return [];
+    const covered = sheltered(context.state);
     return [
       ...(rest.restore
         ? (["blinded", "deafened", "paralyzed", "poisoned"] as const)
@@ -672,7 +684,7 @@ export function ambientRestEvents(
               }),
             )
         : []),
-      ...(rest.condition
+      ...(rest.condition && !covered
         ? [
             dndEvent(`${NS}:effectAdded`, {
               actor: actor.id,

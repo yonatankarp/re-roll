@@ -1216,7 +1216,40 @@
     for each spell slot level above 3. If you create a spell glyph, you can
     store any spell of up to the same level as the spell slot you use for the
     Glyph of Warding.
-  automation: text
+  automation: full
+  # shortcut: the glyph is an explosive rune of Fire on the first foe as the next fight here starts.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: prepared,
+                activation:
+                  {
+                    cost: [],
+                    targeting:
+                      {
+                        area: { shape: sphere, radius: 20 },
+                        range: 60,
+                        side: enemy,
+                      },
+                    resolution:
+                      {
+                        kind: save,
+                        ability: dex,
+                        dc: { base: 0, add: [{ kind: spellSaveDc }] },
+                        damage: [{ amount: { dice: 5d8 }, type: fire }],
+                        onSuccessDamage: half,
+                      },
+                  },
+              },
+            duration: { minutes: 480 },
+          }
   outOfCombat: castingTime
 - id: srd52:spell/guardian-of-faith
   name: Guardian of Faith
@@ -1315,7 +1348,46 @@
     other creature in the area even if they don’t share a common language.
     Vulnerability. Creatures of any types you choose have Vulnerability to one
     damage type of your choice while in the area."
-  automation: text
+  automation: full
+  # shortcut: it bars all five types round its caster as the next fight here starts; its extra effect doesn't play.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: prepared,
+                activation:
+                  {
+                    cost: [],
+                    targeting: { self: true },
+                    resolution:
+                      {
+                        kind: automatic,
+                        effects:
+                          [
+                            {
+                              kind: zone,
+                              zone: area,
+                              radius: 60,
+                              duration: { minutes: 480 },
+                            },
+                          ],
+                      },
+                    area:
+                      {
+                        creatureTypes:
+                          [celestial, elemental, fey, fiend, undead],
+                        barrier: true,
+                      },
+                  },
+              },
+            duration: { minutes: 1440 },
+          }
   outOfCombat: castingTime
 - id: srd52:spell/healing-word
   name: Healing Word
@@ -1646,7 +1718,8 @@
     you can hear. You can cast this spell through solid objects if you are
     familiar with the target and know it is beyond the barrier. Magical silence;
     1 foot of stone, metal, or wood; or a thin sheet of lead blocks the spell.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/mirage-arcane
   name: Mirage Arcane
@@ -1838,7 +1911,15 @@
     existence, this spell can take you to that circle. If the teleportation
     circle is too small to hold all the creatures you transported, they appear
     in the closest unoccupied spaces next to the circle.
-  automation: text
+  automation: full
+  # shortcut: only its willing travellers play: the party gets away where it may flee.
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: escape }
   outOfCombat: utility
 - id: srd52:spell/power-word-kill
   name: Power Word Kill
@@ -2244,7 +2325,8 @@
     a creature can block your ability to reach it again with this spell for 8
     hours. If you try to send another message during that time, you learn that
     you are blocked, and the spell fails.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/shield-of-faith
   name: Shield of Faith
@@ -2554,7 +2636,8 @@
     telepathically through the bond whether or not they share a language. The
     communication is possible over any distance, though it can’t extend to other
     planes of existence.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
 - id: srd52:spell/time-stop
   name: Time Stop
   level: 9
@@ -2880,7 +2963,8 @@
     destination before the spell ends, the message is lost, and the Beast
     returns to where you cast the spell. Using a Higher-Level Spell Slot. The
     spell’s duration increases by 48 hours for each spell slot level above 2.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/antimagic-field
   name: Antimagic Field
@@ -3231,8 +3315,22 @@
     see, but you must be touching the surface on which the words are written. It
     takes about 1 minute to read one page of text. This spell doesn’t decode
     symbols or secret messages.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: comprehension
+          duration:
+            minutes: 60
 - id: srd52:spell/conjure-celestial
   name: Conjure Celestial
   level: 7
@@ -3986,7 +4084,41 @@
     in one corridor or room (the wind blows continuously while the spell lasts)
     • Suggestion in one 5-foot square; any creature that enters that square
     receives the suggestion mentally"
-  automation: text
+  automation: full
+  # shortcut: its warded area fills with Fog round its caster as the next fight here starts; its locks, webs and confusion don't play.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: prepared,
+                activation:
+                  {
+                    cost: [],
+                    targeting: { self: true },
+                    resolution:
+                      {
+                        kind: automatic,
+                        effects:
+                          [
+                            {
+                              kind: zone,
+                              zone: fog,
+                              radius: 50,
+                              duration: { minutes: 480 },
+                            },
+                          ],
+                      },
+                    area: {},
+                  },
+              },
+            duration: { minutes: 1440 },
+          }
   outOfCombat: castingTime
 - id: srd52:spell/hallucinatory-terrain
   name: Hallucinatory Terrain
@@ -4201,7 +4333,17 @@
     defeating a specific monster. A Dispel Magic spell can end the spell only if
     it is cast with a level 9 spell slot, targeting either the prison or the
     component used to create it."
-  automation: text
+  automation: full
+  # shortcut: whatever its form, the prisoner is sent away for good.
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: 30, side: enemy }
+    resolution:
+      kind: save
+      ability: wis
+      dc: { base: 0, add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: sendAway }
   outOfCombat: castingTime
 - id: srd52:spell/irresistible-dance
   name: Irresistible Dance
@@ -4373,7 +4515,46 @@
     direction, preventing a creature of the specified type from leaving the
     Cylinder and protecting targets outside it. Using a Higher-Level Spell Slot.
     The duration increases by 1 hour for each spell slot level above 3."
-  automation: text
+  automation: full
+  # shortcut: the circle bars all five types, round its caster as the next fight here starts.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: prepared,
+                activation:
+                  {
+                    cost: [],
+                    targeting: { self: true },
+                    resolution:
+                      {
+                        kind: automatic,
+                        effects:
+                          [
+                            {
+                              kind: zone,
+                              zone: area,
+                              radius: 10,
+                              duration: { minutes: 480 },
+                            },
+                          ],
+                      },
+                    area:
+                      {
+                        creatureTypes:
+                          [celestial, elemental, fey, fiend, undead],
+                        barrier: true,
+                      },
+                  },
+              },
+            duration: { minutes: 60 },
+          }
   outOfCombat: castingTime
 - id: srd52:spell/magnificent-mansion
   name: Magnificent Mansion
@@ -4408,7 +4589,18 @@
     leave the dwelling. When the spell ends, any creatures or objects left
     inside the extradimensional space are expelled into the unoccupied spaces
     nearest to the entrance.
-  automation: text
+  automation: full
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: sheltered },
+            duration: { until: longRest },
+          }
   outOfCombat: castingTime
 - id: srd52:spell/mass-suggestion
   name: Mass Suggestion
@@ -4813,7 +5005,8 @@
     day for 365 days makes the spell last until dispelled. Using a Higher-Level
     Spell Slot. You can increase the size of the Cube by 100 feet for each spell
     slot level above 4."
-  automation: text
+  automation: full
+  # Its protections are against scrying and teleporting in, which nothing in play does to the party.
   outOfCombat: castingTime
 - id: srd52:spell/protection-from-evil-and-good
   name: Protection from Evil and Good
@@ -4962,7 +5155,19 @@
     up to eight Medium or smaller creatures. Attacks, spells, and other effects
     can’t pass into or out of the space, but creatures inside it can see through
     the portal. Anything inside the space drops out when the spell ends.
-  automation: text
+  automation: full
+  # shortcut: between scenes it keeps the place's harm from a rest.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: sheltered },
+            duration: { until: longRest },
+          }
   outOfCombat: utility
 - id: srd52:spell/searing-smite
   name: Searing Smite
@@ -5043,7 +5248,8 @@
     be anything you choose, but it must occur or be visible within 1 mile of the
     target. Examples include “after 1,000 years” or “when the tarrasque
     awakens.” This spell also ends if the target takes any damage.
-  automation: text
+  automation: full
+  # Hiding a creature or object for a long while changes nothing in play.
   outOfCombat: utility
 - id: srd52:spell/shillelagh
   name: Shillelagh
@@ -5324,7 +5530,34 @@
     east; 2, southeast; 3, south; 4, southwest; 5, west; 6, northwest; 7, north;
     or 8, northeast. On Target. You and your group (or the target object) appear
     where you intended."
-  automation: text
+  automation: full
+  # shortcut: in a fight the party gets away where it may flee; between scenes it crosses a gap, climb, wall or chase,
+  # with a 13 percent mishap on a very familiar place.
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: escape }
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: sceneAid,
+                about: [gap, climb, wall, chase, water],
+                aid: success,
+                once: true,
+                chance: 87,
+              },
+            duration: instantaneous,
+          }
   outOfCombat: utility
 - id: srd52:spell/tiny-hut
   name: Tiny Hut
@@ -5350,7 +5583,19 @@
     (no action required). The Emanation is opaque from the outside and of any
     color you choose, but it’s transparent from the inside. The spell ends early
     if you leave the Emanation or if you cast it again.
-  automation: text
+  automation: full
+  # shortcut: in a fight it changes nothing; between scenes it keeps the place's harm from a rest.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: sheltered },
+            duration: { until: longRest },
+          }
   outOfCombat: castingTime
 - id: srd52:spell/true-resurrection
   name: True Resurrection
@@ -8009,7 +8254,8 @@
     spell also ends if you cast this spell again or if the Tiny replica chest is
     destroyed. If the spell ends and the larger chest is on the Ethereal Plane,
     the chest remains there for you or someone else to find.
-  automation: text
+  automation: full
+  # A chest hidden on the Ethereal Plane holds nothing a fight or check uses.
 - id: srd52:spell/shapechange
   name: Shapechange
   level: 9
@@ -8215,8 +8461,27 @@
     companionship, but at minimum, a Beast can give you information about nearby
     locations and monsters, including whatever it has perceived within the past
     day.
-  automation: text
-  outOfCombat: utility
+  # shortcut: it helps one check with an animal, as talking with it does, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - beast
+            aid: advantage
+            once: true
+          duration:
+            minutes: 10
 - id: srd52:spell/spirit-guardians
   name: Spirit Guardians
   level: 3
@@ -8403,7 +8668,25 @@
     memory after studying it for 1 minute. You can create a permanent
     teleportation circle by casting this spell in the same location every day
     for 365 days.
-  automation: text
+  automation: full
+  # shortcut: a circle to another, between scenes, crosses a gap, climb, wall, chase or water.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: sceneAid,
+                about: [gap, climb, wall, chase, water],
+                aid: success,
+                once: true,
+              },
+            duration: instantaneous,
+          }
   outOfCombat: castingTime
 - id: srd52:spell/tongues
   name: Tongues
@@ -8423,8 +8706,23 @@
     communicates by speaking or signing, any creature that knows at least one
     language can understand it if that creature can hear the speech or see the
     signing.
-  automation: text
-  outOfCombat: utility
+  # shortcut: it's cast on the caster.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: comprehension
+          duration:
+            minutes: 60
 - id: srd52:spell/true-seeing
   name: True Seeing
   level: 6
@@ -8642,7 +8940,14 @@
     spell without first preparing a sanctuary, the spell has no effect. You must
     designate a location, such as a temple, as a sanctuary by casting this spell
     there.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: escape }
   outOfCombat: utility
 - id: srd52:spell/alarm
   name: Alarm
@@ -8665,7 +8970,18 @@
     feet of the warded area. Mental Alarm. You are alerted by a mental ping if
     you are within 1 mile of the warded area. This ping awakens you if you’re
     asleep."
-  automation: text
+  automation: full
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: prepared, alert: true },
+            duration: { minutes: 480 },
+          }
   outOfCombat: castingTime
 - id: srd52:spell/animate-dead
   name: Animate Dead
@@ -8755,7 +9071,8 @@
     target. The spell ends for all the targets if you take a Magic action to
     dismiss it. When the spell ends for a target who isn’t dead, the target
     reappears in its body and exits the state of suspended animation.
-  automation: text
+  automation: full
+  # Travelling the Astral Plane takes the party out of the story, so nothing of it plays.
   outOfCombat: castingTime
 - id: srd52:spell/banishment
   name: Banishment
@@ -9162,7 +9479,50 @@
     spell at a time. If you cast this spell again, the effect of another
     Contingency spell on you ends. Also, Contingency ends on you if its material
     component is ever not on your person.
-  automation: text
+  automation: full
+  # shortcut: its stored spell is Stoneskin, going off on its caster as the next fight here starts.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: prepared,
+                activation:
+                  {
+                    cost: [],
+                    targeting: { self: true },
+                    resolution:
+                      {
+                        kind: automatic,
+                        effects:
+                          [
+                            {
+                              kind: modifier,
+                              modifier:
+                                { kind: resistance, damage: bludgeoning },
+                              duration: { minutes: 60 },
+                            },
+                            {
+                              kind: modifier,
+                              modifier: { kind: resistance, damage: piercing },
+                              duration: { minutes: 60 },
+                            },
+                            {
+                              kind: modifier,
+                              modifier: { kind: resistance, damage: slashing },
+                              duration: { minutes: 60 },
+                            },
+                          ],
+                      },
+                  },
+              },
+            duration: { minutes: 14400 },
+          }
   outOfCombat: castingTime
 - id: srd52:spell/create-food-and-water
   name: Create Food and Water
@@ -9440,7 +9800,8 @@
     the messenger can deliver a message of no more than ten words, and then the
     target makes a Wisdom saving throw. On a failed save, the target gains no
     benefit from its rest, and it takes 3d6 Psychic damage when it wakes up.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
   outOfCombat: castingTime
 - id: srd52:spell/enhance-ability
   name: Enhance Ability
@@ -9508,7 +9869,19 @@
     Higher-Level Spell Slot. You can target up to three willing creatures
     (including yourself) for each spell slot level above 7. The creatures must
     be within 10 feet of you when you cast the spell.
-  automation: text
+  automation: full
+  # shortcut: on the Ethereal Plane it's out of the fight until it comes back with an action.
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: sealed, leave: true },
+            duration: { minutes: 480 },
+          }
 - id: srd52:spell/faithful-hound
   name: Faithful Hound
   level: 4
@@ -9531,7 +9904,45 @@
     hound attempts to bite one enemy within 5 feet of it. That enemy must
     succeed on a Dexterity saving throw or take 4d8 Force damage. On your later
     turns, you can take a Magic action to move the hound up to 30 feet.
-  automation: partial
+  automation: full
+  # Readied before a fight here, it barks (the party isn't surprised) and bites as it starts.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          duration: { minutes: 480 }
+          modifier:
+            kind: prepared
+            alert: true
+            activation:
+              cost: []
+              targeting: { self: true }
+              resolution:
+                {
+                  kind: automatic,
+                  effects:
+                    [
+                      {
+                        kind: zone,
+                        zone: area,
+                        radius: 5,
+                        duration: { minutes: 480 },
+                      },
+                    ],
+                }
+              area:
+                side: enemy
+                when: ownerTurnStart
+                targets: 1
+                resolution:
+                  kind: save
+                  ability: dex
+                  dc: { base: 0, add: [{ kind: spellSaveDc }] }
+                  damage: [{ amount: { dice: 4d8 }, type: force }]
+                  onSuccessDamage: none
   activation:
     cost:
       - action
@@ -9741,7 +10152,54 @@
     overlap with the area of another Forbiddance spell. If you cast Forbiddance
     every day for 30 days in the same location, the spell lasts until it is
     dispelled, and the Material components are consumed on the last casting."
-  automation: text
+  automation: full
+  # shortcut: it harms Fiends and Undead with Radiant, round its caster as the next fight here starts; teleporting into it isn't stopped.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: prepared,
+                activation:
+                  {
+                    cost: [],
+                    targeting: { self: true },
+                    resolution:
+                      {
+                        kind: automatic,
+                        effects:
+                          [
+                            {
+                              kind: zone,
+                              zone: area,
+                              radius: 40,
+                              duration: { minutes: 480 },
+                            },
+                          ],
+                      },
+                    area:
+                      {
+                        creatureTypes: [fiend, undead],
+                        when: turnStart,
+                        enters: true,
+                        resolution:
+                          {
+                            kind: save,
+                            ability: con,
+                            dc: { base: 0, add: [{ kind: spellSaveDc }] },
+                            damage: [{ amount: { dice: 5d10 }, type: radiant }],
+                            onSuccessDamage: half,
+                          },
+                      },
+                  },
+              },
+            duration: { minutes: 1440 },
+          }
   outOfCombat: castingTime
 - id: srd52:spell/gaseous-form
   name: Gaseous Form
@@ -10950,7 +11408,8 @@
     soul to its body, only its animating spirit. Thus, the corpse can’t learn
     new information, doesn’t comprehend anything that has happened since it
     died, and can’t speculate about future events.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/spiritual-weapon
   name: Spiritual Weapon
@@ -11052,7 +11511,40 @@
     if it takes damage or if someone takes an action to shake it awake.
     Stunning. Each target must succeed on a Wisdom saving throw or have the
     Stunned condition for 1 minute."
-  automation: text
+  automation: full
+  # shortcut: the glyph is Death, set off by the first foe as the next fight here starts.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: prepared,
+                activation:
+                  {
+                    cost: [],
+                    targeting:
+                      {
+                        area: { shape: sphere, radius: 60 },
+                        range: 60,
+                        side: enemy,
+                      },
+                    resolution:
+                      {
+                        kind: save,
+                        ability: con,
+                        dc: { base: 0, add: [{ kind: spellSaveDc }] },
+                        damage: [{ amount: { dice: 10d10 }, type: necrotic }],
+                        onSuccessDamage: half,
+                      },
+                  },
+              },
+            duration: { minutes: 1440 },
+          }
   outOfCombat: castingTime
 - id: srd52:spell/thaumaturgy
   name: Thaumaturgy
@@ -11096,7 +11588,31 @@
     existence. You must have seen or touched the destination plant at least once
     before. For the duration, any creature can step into the target plant and
     exit from the destination plant by using 5 feet of movement.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: escape }
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: sceneAid,
+                about: [gap, chase, water],
+                aid: success,
+                once: true,
+              },
+            duration: instantaneous,
+          }
   outOfCombat: utility
 - id: srd52:spell/true-strike
   name: True Strike
@@ -11339,8 +11855,27 @@
     a creature succeeds or fails on this save. An affected creature is aware of
     the spell and can avoid answering questions to which it would normally
     respond with a lie. Such a creature can be evasive yet must be truthful.
-  automation: text
-  outOfCombat: utility
+  # shortcut: it helps one Insight check, as a creature that can't lie does, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - truth
+            aid: advantage
+            once: true
+          duration:
+            minutes: 10
 - id: srd52:spell/alter-self
   name: Alter Self
   level: 2
@@ -12020,7 +12555,19 @@
     spell. Additionally, if you know the nature and contents of a demiplane
     created by a casting of this spell by another creature, you can connect the
     shadowy door to that demiplane instead.
-  automation: text
+  automation: full
+  # shortcut: only its shelter plays; its door to a place made before doesn't.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: sheltered },
+            duration: { until: longRest },
+          }
   outOfCombat: utility
 - id: srd52:spell/dimension-door
   name: Dimension Door
@@ -12043,7 +12590,32 @@
     space occupied by a creature or completely filled by one or more objects,
     you and any creature traveling with you each take 4d6 Force damage, and the
     teleportation fails.
-  automation: text
+  automation: full
+  # shortcut: landing in an occupied space doesn't play.
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: teleport, feet: 500, bring: { count: 1, within: 5, near: 5 } }
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: sceneAid,
+                about: [gap, climb, wall],
+                aid: success,
+                once: true,
+              },
+            duration: instantaneous,
+          }
 - id: srd52:spell/dissonant-whispers
   name: Dissonant Whispers
   level: 1
@@ -12568,7 +13140,15 @@
     your side of the portal. You gain no special power over the creature, and it
     is free to act as the GM deems appropriate. It might leave, attack you, or
     help you.
-  automation: text
+  automation: partial
+  # Gate's summoning waits on re-roll#144; its portal lets the party get away where it may flee.
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: escape }
 - id: srd52:spell/globe-of-invulnerability
   name: Globe of Invulnerability
   level: 6
@@ -13017,7 +13597,8 @@
     example, you could instruct the mouth to speak when any creature moves
     within 30 feet of the object or when a silver bell rings within 30 feet of
     it.
-  automation: text
+  automation: full
+  # A spoken message changes nothing in play.
   outOfCombat: castingTime
 - id: srd52:spell/mass-heal
   name: Mass Heal
@@ -13954,7 +14535,8 @@
     about, but they can move their branches, tendrils, and stalks for you. If a
     Plant creature is in the area, you can communicate with it as if you shared
     a common language.
-  automation: text
+  # no rules effect in play: no map marks which Difficult Terrain is plant growth, and what plants tell is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/starry-wisp
   name: Starry Wisp
@@ -14176,7 +14758,32 @@
     another 5 feet of movement. If you have no movement left, you appear within
     5 feet of the tree you entered. You can use this transportation ability only
     once on each of your turns. You must end each turn outside a tree.
-  automation: text
+  automation: full
+  # shortcut: any tree will do, as the map holds none.
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: escape }
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: sceneAid,
+                about: [gap, climb, chase],
+                aid: success,
+                once: true,
+              },
+            duration: instantaneous,
+          }
   outOfCombat: utility
 - id: srd52:spell/tsunami
   name: Tsunami
@@ -14332,5 +14939,23 @@
     target is in cloud form and flying when the effect ends, the target descends
     60 feet per round for 1 minute until it lands, which it does safely. If it
     can’t land after 1 minute, it falls the remaining distance.
-  automation: text
+  automation: full
+  # shortcut: between scenes its flight crosses a gap, climb, chase or water.
+  scene:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: sceneAid,
+                about: [gap, climb, chase, water],
+                aid: success,
+                once: true,
+              },
+            duration: instantaneous,
+          }
   outOfCombat: castingTime

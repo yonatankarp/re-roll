@@ -146,13 +146,45 @@ describe("spending gold", () => {
   });
 
   it("tells whether the party can pay", async () => {
-    const { state } = await fighter();
+    const { state, context } = await fighter();
+    const access = context(state);
     const hasGold = scenePredicates[`${NS}:hasGold`];
-    expect(hasGold.evaluate({ atLeast: 100 }, { ...state, gold: 100 })).toBe(
-      true,
-    );
-    expect(hasGold.evaluate({ atLeast: 100 }, { ...state, gold: 99.5 })).toBe(
+    expect(
+      hasGold.evaluate({ atLeast: 100 }, { ...state, gold: 100 }, access),
+    ).toBe(true);
+    expect(
+      hasGold.evaluate({ atLeast: 100 }, { ...state, gold: 99.5 }, access),
+    ).toBe(false);
+  });
+
+  it("tells whether the party understands a language, known or by magic", async () => {
+    const { state, context } = await fighter();
+    const access = context(state);
+    const understands = scenePredicates[`${NS}:understands`];
+    expect(understands.evaluate({ language: "draconic" }, state, access)).toBe(
       false,
     );
+    const player = state.actors[PLAYER_ACTOR];
+    if (!player) throw new Error("no player");
+    const comprehending = {
+      ...state,
+      actors: {
+        ...state.actors,
+        [PLAYER_ACTOR]: {
+          ...player,
+          activeEffects: [
+            {
+              sourceId: "spell:srd52:spell/comprehend-languages",
+              casterId: PLAYER_ACTOR,
+              modifier: { kind: "comprehension" as const },
+              ends: "spellDuration" as const,
+            },
+          ],
+        },
+      },
+    };
+    expect(
+      understands.evaluate({ language: "draconic" }, comprehending, access),
+    ).toBe(true);
   });
 });
