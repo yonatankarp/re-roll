@@ -790,9 +790,9 @@ function heldTools(
     ...[...classes].flatMap(
       (id) => ClassSchema.safeParse(access.content(id)).data?.tools ?? [],
     ),
-    ...[background ? toolByName(background.tool, access) : undefined].flatMap(
-      (id) => (id ? [id] : []),
-    ),
+    ...[
+      background?.tool ? toolByName(background.tool, access) : undefined,
+    ].flatMap((id) => (id ? [id] : [])),
     ...answered(base, "tools"),
     ...Object.values(draft.picks).flat(),
   ];
