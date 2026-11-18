@@ -31,7 +31,12 @@ import {
 import { ITEM_PREFIX, encodeOption, parseOption } from "./combat/ids.ts";
 import { CastCheckSchema, castAction } from "./combat/actions.ts";
 import { tableOf, tableRoll } from "./combat/reactions.ts";
-import { actorOf, findAction, slotLevelFor } from "./combat/queries.ts";
+import {
+  actorOf,
+  findAction,
+  slotLevelFor,
+  squareName,
+} from "./combat/queries.ts";
 import { opportunity, provokers, teleportSquares } from "./combat/movement.ts";
 import { familiarHelpUse } from "./combat/familiar.ts";
 import { mountEvents, mountOptions } from "./combat/mounts.ts";
@@ -145,7 +150,7 @@ import {
 } from "./tactics.ts";
 import { fogged, knownFoes, partySight } from "./fog.ts";
 import { hasteActing } from "./combat/durations.ts";
-import { placedFlag } from "./zones.ts";
+import { discernEvent, placedFlag, believes, zonesOf } from "./zones.ts";
 import {
   STRIKE,
   TRADE,
@@ -174,6 +179,8 @@ const DODGE = `${TACTIC}dodge`;
 const HIDE = HIDE_SOURCE;
 const SEARCH = `${TACTIC}search`;
 export const STUDY = `${TACTIC}study`;
+const STUDY_IMAGE = `${TACTIC}study-image`;
+const STUDY_PHANTASM = `${TACTIC}study-phantasm`;
 const HELP = `${TACTIC}help`;
 const GRAPPLE = GRAPPLE_SOURCE;
 const SHOVE = `${TACTIC}shove`;
@@ -1265,6 +1272,21 @@ export function tacticOptions(
   if (searchable(actor, state, access)) {
     options.push({ id: SEARCH, label: "Search for hidden foes (Perception)" });
   }
+  // Studying something it might see through, without naming it an illusion.
+  for (const zone of studyableImages(actor, state)) {
+    options.push({
+      id: encodeOption(STUDY_IMAGE, zone.owner, zone.sourceId),
+      label: `Study what's at ${squareName(zone.at)} (Investigation)`,
+    });
+  }
+  for (const phantasm of actor.activeEffects.filter(
+    ({ studyDc }) => studyDc !== undefined,
+  )) {
+    options.push({
+      id: encodeOption(STUDY_PHANTASM, phantasm.casterId, phantasm.sourceId),
+      label: "Study what you see (Investigation)",
+    });
+  }
   for (const grapple of grapplesOn(actor)) {
     const grappler = state.actors[grapple.casterId];
     options.push({
@@ -1763,6 +1785,68 @@ export function runTactic(
         frames: done,
       };
     }
+    case STUDY_IMAGE: {
+      const zone = zonesOf(state).find(
+        (item) => item.owner === targetId && item.sourceId === detail,
+      );
+      if (!zone) throw new Error(`${actor.id} has nothing there to study`);
+      const rolled = abilityCheck(
+        actor,
+        "investigation",
+        "int",
+        zone.dc ?? 10,
+        (success) =>
+          success ? "investigation (an illusion)" : "investigation",
+        context,
+        false,
+        undefined,
+        subtle(zone.owner, state, context),
+      );
+      return {
+        events: [
+          spend("action"),
+          ...rolled.events,
+          ...(rolled.success ? [discernEvent(actor, zone)] : []),
+        ],
+        frames: done,
+      };
+    }
+    case STUDY_PHANTASM: {
+      const phantasm = actor.activeEffects.find(
+        (item) =>
+          item.sourceId === detail &&
+          item.casterId === targetId &&
+          item.studyDc !== undefined,
+      );
+      if (!phantasm) throw new Error(`${actor.id} sees no phantasm`);
+      const rolled = abilityCheck(
+        actor,
+        "investigation",
+        "int",
+        phantasm.studyDc ?? 10,
+        (success) => (success ? "investigation (a phantasm)" : "investigation"),
+        context,
+        false,
+        undefined,
+        subtle(phantasm.casterId, state, context),
+      );
+      return {
+        events: [
+          spend("action"),
+          ...rolled.events,
+          ...(rolled.success
+            ? [
+                dndEvent(`${NS}:effectEnded`, {
+                  actor: actor.id,
+                  sourceId: phantasm.sourceId,
+                  casterId: phantasm.casterId,
+                }),
+              ]
+            : []),
+        ],
+        frames: done,
+      };
+    }
     case STUDY:
     case BONUS_STUDY: {
       // shortcut: what's learned is only reported, as nothing else in the rules reads it.
@@ -1781,10 +1865,29 @@ export function runTactic(
         context,
         keen !== null,
       );
+      // A disguise is seen through with Investigation against its DC.
+      const guise = studied.activeEffects.find(
+        ({ modifier }) => modifier.kind === "disguise",
+      );
+      const unmasked =
+        guise?.modifier.kind === "disguise" && studied.side !== actor.side
+          ? abilityCheck(
+              actor,
+              "investigation",
+              "int",
+              guise.modifier.dc ?? 10,
+              (success) =>
+                success
+                  ? `investigation (${studied.name} is disguised)`
+                  : "investigation",
+              context,
+            ).events
+          : [];
       return {
         events: [
           ...actionOrBonus(kind === STUDY, "study"),
           ...rolled.events,
+          ...unmasked,
           ...keenSpent(actor, keen, rolled.success),
         ],
         frames: [
@@ -2662,4 +2765,45 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   if (ids.has(DASH) && !ids.has(MOVE) && foes.length > 0) return DASH;
   if (ids.has(DODGE) && foes.some((foe) => within5(foe, actor))) return DODGE;
   return PASS;
+}
+
+// The illusions within 60 feet a creature hasn't seen through, which it can study.
+function studyableImages(actor: Actor, state: DndState) {
+  return zonesOf(state).filter(
+    (zone) =>
+      zone.zone === "image" &&
+      zone.owner !== actor.id &&
+      distanceFeet(actor.position, zone.at) <= STUDY_REACH &&
+      (zone.decoy
+        ? !discernsZone(actor, zone)
+        : believes(zone, state, actor.id)),
+  );
+}
+
+const STUDY_REACH = 60;
+
+const discernsZone = (
+  actor: Actor,
+  zone: ReturnType<typeof zonesOf>[number],
+): boolean =>
+  actor.activeEffects.some(
+    ({ modifier }) =>
+      modifier.kind === "discerned" &&
+      modifier.source === zone.sourceId &&
+      modifier.caster === zone.owner,
+  );
+
+// Illusion Adept: checks to see through its maker's illusions have Disadvantage.
+function subtle(
+  maker: string,
+  state: DndState,
+  access: ContentAccess,
+): boolean {
+  const owner = state.actors[maker];
+  return (
+    owner !== undefined &&
+    deriveStats(owner, access).passives.some(
+      (passive) => passive.kind === "subtleIllusions",
+    )
+  );
 }

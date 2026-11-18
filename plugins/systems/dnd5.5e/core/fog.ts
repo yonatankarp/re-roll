@@ -182,6 +182,14 @@ export function partySight(state: DndState, access: ContentAccess): PartySight {
       squares.add(key);
     }
   }
+  // Its own image's eyes, as Mislead's double or Project Image's copy.
+  for (const zone of zonesOf(state)) {
+    const owner = viewers.find((viewer) => viewer.id === zone.owner);
+    if (zone.zone !== "image" || !zone.decoy || !owner) continue;
+    for (const key of seenFrom(owner, zone.at, state, access)) {
+      squares.add(key);
+    }
+  }
   // The search outward can miss a square the sight rules' own line reaches, such as one along the map's edge,
   // so a foe is also in view when a line runs between it and a party member either way: what can aim at the
   // party, or be aimed at, is seen.

@@ -33,6 +33,9 @@ import { finalDamage } from "../rules.ts";
 import type { Damage } from "../schemas.ts";
 import {
   antimagicEvents,
+  believes,
+  discernEvent,
+  inZone,
   placedConditionEvents,
   blockingSet,
   sealed,
@@ -580,8 +583,22 @@ export function runFinishMove(
       ...(fields ? placedEvents(applyDndEvent(context.state, moved)) : []),
       ...carriedEvents(walker, { x: payload.x, y: payload.y }, context),
       ...beenEvents(walker, { x: payload.x, y: payload.y }, context),
+      ...revealedEvents(arrived, context),
     ],
   };
+}
+
+// Walking into an illusion shows it for what it is, as things pass through it.
+function revealedEvents(actor: Actor, context: Context): SystemEvent[] {
+  return zonesOf(context.state)
+    .filter(
+      (zone) =>
+        zone.zone === "image" &&
+        !zone.decoy &&
+        inZone(zone, actor.position) &&
+        believes(zone, context.state, actor.id),
+    )
+    .map((zone) => discernEvent(actor, zone));
 }
 
 // Open squares within `near` feet of `centre`, nearest first, that no one stands on and no wall fills.

@@ -432,6 +432,13 @@ const BOARD_CSS = `
 .dnd-area.sunlight { background: radial-gradient(circle, rgb(255 240 170 / 32%), rgb(255 240 170 / 8%) 75%); }
 .dnd-area.area { background: rgb(80 140 255 / 14%); border-color: rgb(130 175 255 / 65%); }
 .dnd-area.area.foe { background: rgb(215 55 35 / 15%); border-color: rgb(255 115 90 / 65%); }
+/* An illusion: its maker's side sees it shimmer; a foe's, not yet seen through, looks like any other shape. */
+.dnd-area.image {
+  background: repeating-linear-gradient(135deg, rgb(190 170 255 / 22%) 0 4px, rgb(255 255 255 / 6%) 4px 9px);
+  border-color: rgb(200 185 255 / 55%);
+  border-style: dotted;
+}
+.dnd-area.image.foe { background: rgb(120 105 85 / 45%); border-color: rgb(200 185 160 / 45%); border-style: solid; }
 .dnd-area.wall {
   border-radius: 2px;
   border: 1px solid rgb(255 240 205 / 55%);
