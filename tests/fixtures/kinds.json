@@ -80,6 +80,7 @@
     "dnd5.5e:endTurn",
     "dnd5.5e:environmentEntered",
     "dnd5.5e:escape",
+    "dnd5.5e:exhaustedToDeath",
     "dnd5.5e:exhaustionChanged",
     "dnd5.5e:fall",
     "dnd5.5e:familiarFound",
@@ -269,6 +270,7 @@
     "dnd5.5e:effectsSuppressed",
     "dnd5.5e:environmentEntered",
     "dnd5.5e:escape",
+    "dnd5.5e:exhaustedToDeath",
     "dnd5.5e:exhaustionChanged",
     "dnd5.5e:fall",
     "dnd5.5e:familiarFound",
@@ -421,7 +423,7 @@
     "dnd5.5e:damageShareLowered": ["share"],
     "dnd5.5e:damaged": ["actor", "amount", "critical", "massive", "type"],
     "dnd5.5e:damagedFromInside": ["actor", "amount"],
-    "dnd5.5e:deathSaveRolled": ["actor", "counts?", "natural"],
+    "dnd5.5e:deathSaveRolled": ["actor", "counts?", "natural", "total?"],
     "dnd5.5e:deceptionSensed": ["actor", "count"],
     "dnd5.5e:dieRolled": ["actor", "die", "label", "rolled"],
     "dnd5.5e:diseaseCaught": ["actor", "record"],
@@ -533,6 +535,7 @@
     "restTaken": [],
     "runStarted": ["state"],
     "sceneEntered": ["scene"],
-    "secretRevealed": ["secret"]
+    "secretRevealed": ["secret"],
+    "dnd5.5e:exhaustedToDeath": ["actor"]
   }
 }
