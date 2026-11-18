@@ -10,6 +10,7 @@ import type { ModelStore } from "./kokoro-files.ts";
 export interface SoundSettings {
   readonly volume: number; // 0 to 1, for everything
   readonly ambience: boolean;
+  readonly music: boolean;
   readonly effects: boolean;
   readonly narration: boolean;
   readonly voice: NarratorVoice;
@@ -21,11 +22,12 @@ const EFFECTS_KEY = "re-roll:sound"; // the older on/off setting, which now mean
 // Where the settings are kept: the page's localStorage unless a store is passed, as tests do.
 export type SettingsStore = Pick<Storage, "getItem" | "setItem">;
 
-// Storage can be blocked, which leaves the defaults: effects and quiet ambience on, narration off.
+// Storage can be blocked, which leaves the defaults: effects, music and quiet ambience on, narration off.
 export function loadSettings(store?: SettingsStore): SoundSettings {
   const defaults: SoundSettings = {
     volume: 0.7,
     ambience: true,
+    music: true,
     effects: true,
     narration: false,
     voice: DEFAULT_VOICE,
@@ -43,6 +45,7 @@ export function loadSettings(store?: SettingsStore): SoundSettings {
           : defaults.volume,
       // Someone who turned sound off before ambience existed doesn't get it unasked.
       ambience: typeof saved.ambience === "boolean" ? saved.ambience : effects,
+      music: typeof saved.music === "boolean" ? saved.music : effects,
       effects,
       narration:
         typeof saved.narration === "boolean"
@@ -64,10 +67,10 @@ export function saveSettings(
   try {
     const to = store ?? localStorage;
     to.setItem(EFFECTS_KEY, settings.effects ? "on" : "off");
-    const { volume, ambience, narration, voice } = settings;
+    const { volume, ambience, music, narration, voice } = settings;
     to.setItem(
       SETTINGS_KEY,
-      JSON.stringify({ volume, ambience, narration, voice }),
+      JSON.stringify({ volume, ambience, music, narration, voice }),
     );
   } catch {
     // Not remembered, but still applies for now.

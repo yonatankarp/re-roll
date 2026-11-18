@@ -242,6 +242,88 @@ function build(context: AudioContext, kind: Ambience): Soundscape | null {
       });
       break;
     }
+    case "sea": {
+      // Swells: surf that rises and falls about every eight seconds, over a low roll.
+      const surf = bed("lowpass", 900, 0.6, 0.3);
+      sway(surf.level.gain, 0.12, 0.28);
+      sway(surf.filter.frequency, 0.12, 500);
+      const roll = bed("lowpass", 160, 0.5, 0.45);
+      sway(roll.level.gain, 0.06, 0.2);
+      bed("highpass", 5000, 0.5, 0.04);
+      // A gull now and then: a high cry that falls away.
+      every(9000, 25000, () => {
+        const pitch = between(1500, 2000);
+        ping(pitch, pitch * 0.7, 0.35, 0.05);
+        setTimeout(() => {
+          ping(pitch * 1.05, pitch * 0.75, 0.3, 0.04);
+        }, 380);
+      });
+      break;
+    }
+    case "swamp": {
+      bed("lowpass", 250, 0.6, 0.25);
+      // Insects: a high band that pulses quickly, and slowly comes and goes.
+      const insects = bed("bandpass", 4200, 8, 0.12);
+      sway(insects.level.gain, 23, 0.1);
+      sway(insects.filter.frequency, 0.05, 400);
+      // Frogs: a few low croaks together.
+      every(2500, 7000, () => {
+        const pitch = between(110, 170);
+        const croaks = 2 + Math.floor(Math.random() * 3);
+        for (let croak = 0; croak < croaks; croak += 1) {
+          setTimeout(() => {
+            ping(pitch * 1.3, pitch, 0.12, 0.25);
+          }, croak * 160);
+        }
+      });
+      every(1500, 5000, () => {
+        burst("lowpass", between(300, 600), 0.15, 0.2); // something stirs the water
+      });
+      break;
+    }
+    case "temple": {
+      // A held drone on a fifth, and a far bell now and then, in a stone echo.
+      const hall = echo();
+      for (const [pitch, gain] of [
+        [98, 0.08],
+        [147, 0.05],
+        [196, 0.025],
+      ] as const) {
+        const drone = context.createOscillator();
+        drone.type = "triangle";
+        drone.frequency.value = pitch;
+        const level = context.createGain();
+        level.gain.value = gain;
+        drone.connect(level).connect(out);
+        sway(level.gain, 0.03 + pitch / 10000, gain * 0.5);
+        start(drone);
+      }
+      bed("lowpass", 300, 0.5, 0.15);
+      every(14000, 32000, () => {
+        const pitch = between(380, 520);
+        for (const [ratio, peak] of [
+          [1, 0.18],
+          [2.76, 0.07],
+          [5.4, 0.03],
+        ] as const) {
+          ping(pitch * ratio, pitch * ratio * 0.995, 4, peak, hall);
+        }
+      });
+      break;
+    }
+    case "interior": {
+      // Room tone: a low hush, and the odd creak of wood or a shifting log.
+      bed("lowpass", 140, 0.5, 0.35);
+      bed("bandpass", 600, 0.5, 0.03);
+      every(6000, 18000, () => {
+        const pitch = between(180, 320);
+        ping(pitch, pitch * between(0.8, 1.2), between(0.25, 0.5), 0.05);
+      });
+      every(10000, 30000, () => {
+        burst("bandpass", between(400, 900), 0.08, 0.15);
+      });
+      break;
+    }
   }
 
   return {

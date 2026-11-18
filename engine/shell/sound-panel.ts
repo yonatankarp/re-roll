@@ -1,6 +1,8 @@
 import { NARRATOR_VOICES } from "../story/narration.ts";
 import { ambiencePlayer } from "./ambience.ts";
 import { setMasterVolume } from "./audio.ts";
+import { moodOf, musicPlayer } from "./music.ts";
+import { playSting, stingsBetween } from "./sound-files.ts";
 import { health, narrator } from "./narration.ts";
 import {
   type SettingsStore,
@@ -12,8 +14,9 @@ import {
 import type { GameView } from "./session.ts";
 
 // The game's sound: a "Sound…" entry for the game menu that opens a small panel (volume,
-// ambience, effects, narration, voice), the narrator's controls for under the scene text, and an
-// update to call on each redraw, which picks the ambience and starts or stops the narrator.
+// ambience, music, effects, narration, voice), the narrator's controls for under the scene text, and
+// an update to call on each redraw, which picks the ambience and music, sounds the moments that
+// just happened, and starts or stops the narrator.
 
 function field(label: string, input: HTMLElement): HTMLLabelElement {
   const row = document.createElement("label");
@@ -36,6 +39,7 @@ export function soundControls(
   let settings = loadSettings(store);
   setMasterVolume(settings.volume);
   const ambience = ambiencePlayer();
+  const music = musicPlayer();
   let view: GameView | null = null;
   let camping = false;
   let decision: string | null = null;
@@ -46,6 +50,12 @@ export function soundControls(
       !settings.ambience ? "none" : camping ? "campfire" : view.ambience,
     );
     ambience.duck(view.combat !== null || narration.speaking());
+    music.play(
+      settings.music
+        ? moodOf(view.ambience, view.combat !== null, view.ended !== null)
+        : "none",
+    );
+    music.duck(narration.speaking());
     // Any choice stops the narrator; only a new scene starts it again.
     const asked = view.decision?.id ?? null;
     if (asked !== decision) {
@@ -61,6 +71,7 @@ export function soundControls(
   };
   const narration = narrator(clipUrl, () => {
     ambience.duck(view?.combat !== null || narration.speaking());
+    music.duck(narration.speaking());
   });
 
   const change = (next: Partial<SoundSettings>): void => {
@@ -80,7 +91,7 @@ export function soundControls(
   });
   const toggle = (
     label: string,
-    key: "ambience" | "effects" | "narration",
+    key: "ambience" | "music" | "effects" | "narration",
   ): HTMLLabelElement => {
     const box = document.createElement("input");
     box.type = "checkbox";
@@ -135,6 +146,7 @@ export function soundControls(
     heading,
     volumeRow,
     toggle("Ambience", "ambience"),
+    toggle("Music", "music"),
     toggle("Effects", "effects"),
     toggle("Narration", "narration"),
     voiceRow,
@@ -169,8 +181,10 @@ export function soundControls(
       view = null; // so nothing starts again
       narration.stop();
       ambience.play("none");
+      music.play("none");
     },
     update(next) {
+      if (settings.effects) stingsBetween(view, next).forEach(playSting);
       view = next;
       apply();
     },
@@ -178,8 +192,15 @@ export function soundControls(
       new MutationObserver(() => {
         // Not while it only says why there's no rest.
         camping = camp.open && camp.dataset.notice === undefined;
+        if (camp.dataset.rested !== undefined) {
+          delete camp.dataset.rested;
+          if (settings.effects) playSting("rest");
+        }
         apply();
-      }).observe(camp, { attributes: true, attributeFilter: ["open"] });
+      }).observe(camp, {
+        attributes: true,
+        attributeFilter: ["open", "data-rested"],
+      });
     },
   };
 }
