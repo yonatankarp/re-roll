@@ -81,6 +81,7 @@ import {
   nextHitDie,
   piercing,
   interposedShield,
+  d20Floor,
   evades,
   markedBy,
   rescuedSave,
@@ -119,11 +120,15 @@ import {
   zonesOn,
 } from "../zones.ts";
 import { caughtBy } from "../targeting.ts";
-import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
+import { behindTotalCover, coverAgainst, coverFor, seeing } from "../sight.ts";
 import { teleportFrame, teleportSquares } from "./movement.ts";
 import {
   afterDamage,
   beforeDamage,
+  counterBeforeSave,
+  preyBonus,
+  spellAimedAt,
+  turnedOn,
   besideSquare,
   reactFrames,
   settleRoll,
@@ -726,6 +731,8 @@ function enduredEvents(
           actor: bearer.id,
           resource: trait.resource,
         }),
+        // For a reaction right after it, as Orcish Fury's attack (combat/reactions.ts).
+        dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key: ENDURED }),
         ...(trait.burst
           ? burstEvents(target, target, trait.burst, context)
           : []),
@@ -769,6 +776,8 @@ function enduredEvents(
   }
   return { rolled, endured: null };
 }
+
+export const ENDURED = "endured";
 
 // A foe that just dropped to 0 Hit Points feeds its enemies' traits, as Dark One's Blessing.
 // shortcut: the creature whose turn it is counts as the one that dropped it, as most damage comes on its own turn.
@@ -1398,26 +1407,48 @@ export function dealEvents(
   hits: readonly { readonly amount: number; readonly type: Damage["type"] }[],
   critical: boolean,
   context: Context,
+  source?: Actor, // the creature dealing it, for a reaction aimed back at it, as Backlash's
+  magical = false, // a spell's, for Magic Absorption
 ): { events: SystemEvent[]; dealt: number } {
   let { state } = context;
   const events: SystemEvent[] = [];
   let dealt = 0;
   for (const hit of hits) {
     const current = state.actors[target.id] ?? target;
-    const reduced = reducedHit(current, hit.amount, hit.type, {
-      ...context,
-      state,
-    });
+    const reduced = reducedHit(
+      current,
+      hit.amount,
+      hit.type,
+      { ...context, state },
+      magical,
+    );
     // A reaction such as Vitality Ward may lessen it before it lands.
-    const lessened = beforeDamage(current, reduced.amount, hit.type, {
-      ...context,
-      state,
-    });
+    const lessened = beforeDamage(
+      current,
+      reduced.amount,
+      hit.type,
+      { ...context, state },
+      source && (state.actors[source.id] ?? source),
+    );
     const { amount, type } = { ...hit, amount: lessened.amount };
+    // Thought Shield: the creature that dealt it takes the same.
+    const mirrored =
+      source &&
+      source.id !== target.id &&
+      amount > 0 &&
+      deriveStats(current, context).passives.some(
+        (passive) => passive.kind === "mirrorDamage" && passive.damage === type,
+      )
+        ? damageEvents(state.actors[source.id] ?? source, amount, type, false, {
+            ...context,
+            state,
+          })
+        : [];
     for (const event of [
       ...reduced.events,
       ...lessened.events,
       ...damageEvents(current, amount, type, critical, { ...context, state }),
+      ...mirrored,
     ]) {
       events.push(event);
       if (state.actors[target.id]) state = applyDndEvent(state, event);
@@ -1533,29 +1564,56 @@ function reducedHit(
   amount: number,
   type: Damage["type"],
   context: Context,
+  magical = false,
 ): { amount: number; events: SystemEvent[] } {
   const targetStats = deriveStats(target, context);
+  // Spell Resistance: a spell's damage is halved, unless the bearer resists its type already.
+  if (
+    magical &&
+    hasPassive(targetStats, "spellDamageResistance") &&
+    !damageResponses(target, context).resistances.includes(type)
+  ) {
+    amount = Math.floor(amount / 2);
+  }
+  const { combat } = context.state;
+  const turnKey = (id: string) =>
+    `${id}@${String(combat?.round ?? 0)}:${String(combat?.index ?? 0)}`;
   const worn = passiveModifiers(targetStats.passives).find(
     (modifier) =>
-      modifier.kind === "damageReduction" && modifier.damage === type,
+      modifier.kind === "damageReduction" &&
+      (modifier.damage === undefined || modifier.damage === type) &&
+      (!modifier.magical || magical) &&
+      (!modifier.oncePerTurn ||
+        !target.usedThisTurn.includes(turnKey("damage-reduction"))) &&
+      (!modifier.able || !hasCondition(target, ...INCAPACITATING)),
   );
+  const wornEvents: SystemEvent[] = [];
   if (worn?.kind === "damageReduction" && amount > 0) {
     amount = Math.max(
       0,
       amount - rollAmount(worn.amount, targetStats, context.dice),
     );
+    if (worn.oncePerTurn) {
+      wornEvents.push(
+        dndEvent(`${NS}:oncePerTurnUsed`, {
+          actor: target.id,
+          key: turnKey("damage-reduction"),
+        }),
+      );
+    }
   }
   const effect = target.activeEffects.find(
     ({ modifier }) =>
       modifier.kind === "damageReduction" && modifier.damage === type,
   );
-  const { combat } = context.state;
   if (effect?.modifier.kind !== "damageReduction" || amount <= 0) {
-    return { amount, events: [] };
+    return { amount, events: wornEvents };
   }
   // usedThisTurn clears only as the bearer's own turn starts, so the key names the turn.
-  const key = `${effect.sourceId}@${String(combat?.round ?? 0)}:${String(combat?.index ?? 0)}`;
-  if (target.usedThisTurn.includes(key)) return { amount, events: [] };
+  const key = turnKey(effect.sourceId);
+  if (target.usedThisTurn.includes(key)) {
+    return { amount, events: wornEvents };
+  }
   const cut = rollAmount(
     effect.modifier.amount,
     deriveStats(target, context),
@@ -1563,7 +1621,10 @@ function reducedHit(
   );
   return {
     amount: Math.max(0, amount - cut),
-    events: [dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key })],
+    events: [
+      ...wornEvents,
+      dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key }),
+    ],
   };
 }
 
@@ -1694,6 +1755,16 @@ export function damageRiders(
         ? [dndEvent(`${NS}:resourceSpent`, { actor: attacker.id, resource })]
         : []),
       ...leafEvents(passive.effects, key, attacker, target, context),
+      ...(passive.selfEffects ?? []).flatMap((effect) =>
+        effect.kind === "reactionMove"
+          ? reactionMove(
+              { ...attacker, budget: { ...attacker.budget, reaction: true } },
+              context,
+              effect,
+              target,
+            ).filter((event) => event.kind !== `${NS}:budgetSpent`)
+          : leafEvents([effect], key, attacker, attacker, context),
+      ),
     ];
   });
 }
@@ -1895,7 +1966,10 @@ export function leafEvents(
         }
         const rolled = effect.full
           ? max
-          : (pool?.healed ?? rollAmount(effect.amount, stats, dice));
+          : effect.halfMax
+            ? Math.floor(max / 2)
+            : (pool?.healed ?? rollAmount(effect.amount, stats, dice)) +
+              (effect.perSlot && slotLevel ? effect.perSlot * slotLevel : 0);
         // Fortified Health: once a turn, healing gives the Constitution modifier more.
         const fortified = deriveStats(target, context).passives.find(
           (passive) => passive.kind === "healBonus",
@@ -2049,7 +2123,9 @@ export function leafEvents(
           ...regainEvents(
             target,
             effect.resource,
-            effect.count,
+            effect.perSlot && slotLevel
+              ? effect.perSlot * slotLevel
+              : effect.count,
             deriveStats(target, context),
             regainCap(effect, slotLevel),
           ),
@@ -2804,6 +2880,51 @@ export function leafEvents(
           ...sendAwayEvents(effect, sourceId, caster, target, context),
         );
         break;
+      case "foesTake": {
+        // Deflecting Shroud: the nearest foes the caster sees in range.
+        const { range, creatures, damage } = effect;
+        const foes = enemies(context.state, caster)
+          .filter(
+            (item) =>
+              !isDown(item) &&
+              !isDead(item) &&
+              distanceFeet(caster.position, item.position) <= range &&
+              seeing(caster, item.position, context.state, context) !== "none",
+          )
+          .sort(
+            (a, b) =>
+              distanceFeet(caster.position, a.position) -
+              distanceFeet(caster.position, b.position),
+          )
+          .slice(0, creatures);
+        for (const foe of foes) {
+          const responses = damageResponses(foe, context);
+          events.push(
+            ...dealEvents(
+              foe,
+              damage.map(({ amount, type }) => ({
+                amount: finalDamage(
+                  rollAmount(amount, stats, context.dice),
+                  type,
+                  responses,
+                ),
+                type,
+              })),
+              false,
+              context,
+              caster,
+            ).events,
+          );
+        }
+        break;
+      }
+      case "endConcentration":
+        if (target.concentratingOn !== null) {
+          events.push(
+            dndEvent(`${NS}:concentrationEnded`, { actor: target.id }),
+          );
+        }
+        break;
       case "note":
       case "disperse":
       case "animate":
@@ -2821,10 +2942,13 @@ export function leafEvents(
       case "reroll":
       case "rollBonus":
       case "replaceRoll":
+      case "succeed":
       case "strike":
       case "redirect":
       case "drawAttack":
       case "negateHit":
+      case "noCritical":
+      case "stealSpell":
       case "stickWeapon":
       case "slowFall":
       case "split":
@@ -3333,6 +3457,94 @@ function strongerTogether(
   return near.length > 0 && (bears(target) || near.some(bears));
 }
 
+// A Helm of Brilliance's Taking Fire Damage: a d20, and on a 1 its gems' beams and the helm's end.
+function backfireEvents(
+  bearer: Actor,
+  types: readonly Damage["type"][],
+  context: Context,
+): SystemEvent[] {
+  const stats = deriveStats(bearer, context);
+  const events: SystemEvent[] = [];
+  for (const passive of stats.passives) {
+    if (
+      passive.kind !== "spellBackfire" ||
+      !types.includes(passive.damage) ||
+      !bearer.inventory.includes(passive.item)
+    ) {
+      continue;
+    }
+    const die = context.dice.roll(passive.die);
+    events.push(
+      dndEvent(`${NS}:dieRolled`, {
+        actor: bearer.id,
+        die: passive.die,
+        rolled: die,
+        label: "Taking Fire Damage",
+      }),
+    );
+    if (die !== 1) continue;
+    const gems = passive.resources.reduce(
+      (sum, resource) =>
+        sum +
+        Math.max(
+          0,
+          (stats.resources[resource] ?? 0) -
+            (bearer.resourcesSpent[resource] ?? 0),
+        ),
+      0,
+    );
+    for (const other of Object.values(context.state.actors)) {
+      if (
+        other.id === bearer.id ||
+        isDown(other) ||
+        isDead(other) ||
+        distanceFeet(bearer.position, other.position) > passive.radius ||
+        gems <= 0
+      ) {
+        continue;
+      }
+      const save = rollSave(other, passive.ability, passive.dc, context, true);
+      events.push(...save.events);
+      if (!save.saved) {
+        events.push(
+          ...dealEvents(
+            other,
+            [
+              {
+                amount: finalDamage(
+                  gems,
+                  passive.type,
+                  damageResponses(other, context),
+                ),
+                type: passive.type,
+              },
+            ],
+            false,
+            context,
+            bearer,
+            true,
+          ).events,
+        );
+      }
+    }
+    events.push(
+      dndEvent(`${NS}:itemUsed`, { actor: bearer.id, item: passive.item }),
+    );
+  }
+  return events;
+}
+
+// Storm's Strength: saves against the caster's spells dealing these types have Disadvantage.
+function stormStrength(action: KnownAction, stats: Stats): boolean {
+  if (action.spellLevel === null) return false;
+  const types = action.activation.resolution.damage.map(({ type }) => type);
+  return stats.passives.some(
+    (passive) =>
+      passive.kind === "stormStrength" &&
+      passive.damage.some((type) => types.includes(type)),
+  );
+}
+
 // The saved flag, and the roll for the history. An automatic failure rolls no die, so it has no event.
 export function rollSave(
   target: Actor,
@@ -3352,6 +3564,10 @@ export function rollSave(
   ) {
     return { saved: false, events: [] };
   }
+  // Slayer's Counter: the bearer's attack at its prey first, and a hit makes the save succeed.
+  const countered = counterBeforeSave(target, source?.caster, context);
+  if (countered.hit) return { saved: true, events: countered.events };
+  const counterEvents = countered.events;
   const stats = deriveStats(target, context);
   // Eldritch Strike: Disadvantage only on a save against its caster's spell.
   const against = (effect: Actor["activeEffects"][number]): boolean =>
@@ -3408,13 +3624,19 @@ export function rollSave(
   };
   const lucky = luckyEdge(target, stats, edge.advantage, edge.disadvantage);
   if (lucky) edge.disadvantage = false;
-  const roll = rollD20(context.dice, {
+  const rolled0 = rollD20(context.dice, {
     ...edge,
     rerollOnes: hasPassive(stats, "rerollOnes"),
   });
+  // Trance of Order: a d20 of 9 or lower counts as 10.
+  const roll = {
+    ...rolled0,
+    natural: Math.max(rolled0.natural, d20Floor(target, stats)),
+  };
   const base =
     saveBonus(stats, ability) +
     rollBonus(target, "saves", context, undefined, ability) +
+    preyBonus(target, source?.caster, context) +
     (ability === "dex" ? cover : 0);
   const least = scoreFloor(stats, ability); // Indomitable Might
   // Reactions to the roll before it lands, as Bountiful Luck or Portent (combat/reactions.ts).
@@ -3429,6 +3651,7 @@ export function rollSave(
       natural: roll.natural,
       goal: dc,
       magical,
+      conditions,
       ...judge(roll.natural, 0),
     },
     edge,
@@ -3498,6 +3721,7 @@ export function rollSave(
   return {
     saved,
     events: [
+      ...counterEvents,
       ...(lucky ?? []),
       ...settled.events,
       rolled,
@@ -3645,9 +3869,15 @@ export function resolveAction(
   const frames: Frame[] = [];
   // A helmed horror's Spell Immunity: the spells it names pass it by.
   const spell = isSpell(action, actor, context) ? action.name : null;
+  // Shield against Magic Missile, or Spell Thief: a reaction may turn the spell aside before it lands.
+  const aside = spell
+    ? spellAimedAt(action, actor, aimedAt, context)
+    : { targets: aimedAt, events: [] };
+  events.push(...aside.events);
+  if (spell) events.push(...turnedOn(actor, aside.targets, stats));
   const targets = spell
     ? sculpted(
-        aimedAt.filter(
+        aside.targets.filter(
           (target) => !immuneToSpell(target, spell, context, action),
         ),
         action,
@@ -3776,6 +4006,8 @@ export function resolveAction(
       })),
       false,
       context,
+      actor,
+      action.spellLevel !== null,
     );
     lastDealt = result.dealt;
     events.push(
@@ -4259,7 +4491,9 @@ export function resolveAction(
                 action.spellLevel !== null,
                 coverAgainst(context.state, actor, target, context),
                 conditionsApplied(resolution.onFail),
-                heightened === target.id || edges.includes("disadvantage"),
+                heightened === target.id ||
+                  edges.includes("disadvantage") ||
+                  stormStrength(action, stats),
                 resolution.advantage === true || edges.includes("advantage"),
                 source,
               );
@@ -4369,6 +4603,19 @@ export function resolveAction(
         const within = resolution.damageWithin;
         if (!landed && within === undefined) {
           applyRolled(target, damage(target), scaled);
+        }
+        // A Helm of Brilliance: Fire from a failed save against a spell may set its gems off.
+        if (!saved && !turned && lastDealt > 0 && action.spellLevel !== null) {
+          events.push(
+            ...backfireEvents(
+              target,
+              resolution.damage.map(({ type }) => type),
+              {
+                ...context,
+                state: events.reduce(applyDndEvent, context.state),
+              },
+            ),
+          );
         }
         events.push(
           ...leafEvents(
@@ -4497,6 +4744,7 @@ export function resolveAction(
               source: actor.id,
               success: saved,
               spell: action.spellLevel !== null,
+              conditions: conditionsApplied(resolution.onFail),
             },
             context,
           ),

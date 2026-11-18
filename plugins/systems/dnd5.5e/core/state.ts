@@ -408,6 +408,8 @@ const ActorSchema = z.strictObject({
     reaction: z.boolean(),
   }),
   usedThisTurn: z.array(z.string()),
+  // Portent's foretelling rolls, made as a Long Rest ends and each used once (combat/reactions.ts).
+  foretold: z.array(z.number().int()).optional(),
   resourcesSpent: z.record(z.string(), z.number().int()),
   activeEffects: z.array(ActiveEffectSchema),
   // Spell and item effects held off while it stands in an Antimagic Field, its magic items' powers with them
@@ -886,6 +888,15 @@ export const EVENT_SCHEMAS = {
   }),
   [`${NS}:inspirationGranted`]: ActorOnlySchema,
   [`${NS}:inspirationSpent`]: ActorOnlySchema,
+  // Portent's foretelling rolls, which replace any left, and one of them used.
+  [`${NS}:foretold`]: z.strictObject({
+    actor: z.string(),
+    rolls: z.array(z.number().int()),
+  }),
+  [`${NS}:foretoldUsed`]: z.strictObject({
+    actor: z.string(),
+    roll: z.number().int(),
+  }),
   [`${NS}:treasureFound`]: TreasureFoundSchema,
   [`${NS}:goldSpent`]: GoldSpentSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
@@ -1034,6 +1045,15 @@ export function without(
 }
 
 // What the actor wears and wields: everything carried that isn't stowed.
+const ForetoldSchema = z.object({
+  actor: z.string(),
+  rolls: z.array(z.number().int()),
+});
+const ForetoldUsedSchema = z.object({
+  actor: z.string(),
+  roll: z.number().int(),
+});
+
 export function equipped(actor: Actor): string[] {
   return without(actor.inventory, actor.stowed ?? []);
 }
@@ -2076,6 +2096,22 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         payload(ActorOnlySchema, event).actor,
         (actor) => ({ ...actor, deathSaves: { successes: 3, failures: 0 } }),
       );
+    case `${NS}:foretold`: {
+      const data = payload(ForetoldSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        foretold: data.rolls,
+      }));
+    }
+    case `${NS}:foretoldUsed`: {
+      const data = payload(ForetoldUsedSchema, event);
+      return updateActor(state, data.actor, (actor) => {
+        const left = [...(actor.foretold ?? [])];
+        const at = left.indexOf(data.roll);
+        if (at >= 0) left.splice(at, 1);
+        return { ...actor, foretold: left };
+      });
+    }
     case `${NS}:inspirationGranted`:
       return updateActor(
         state,

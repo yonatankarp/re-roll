@@ -10,6 +10,7 @@ import {
   type Stats,
 } from "../stats.ts";
 import { HIT_DICE, spellOfSource } from "./ids.ts";
+import { distanceFeet } from "../grid.ts";
 import { hitDieRoll } from "../trait-rules.ts";
 import { leafEvents } from "./effects.ts";
 import { teleportFrame } from "./movement.ts";
@@ -197,7 +198,7 @@ export function castRiders(
         )
       : passive.school
         ? slotLevel !== undefined &&
-          cost.includes("action") &&
+          (cost.includes("action") || passive.slotted === true) &&
           passive.school.some((item) => item === school)
         : passive.damage !== undefined && types.has(passive.damage);
     return fits ? [passive] : [];
@@ -232,11 +233,19 @@ export function castRiders(
   return {
     events: [
       ...mended,
-      ...rides.flatMap(({ effects, onTargets, resource }) => [
+      ...rides.flatMap(({ effects, onTargets, resource, toAlly }) => [
         ...(resource
           ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
           : []),
-        ...leafEvents(effects, `castRider:${action.id}`, actor, actor, context),
+        ...leafEvents(
+          effects,
+          `castRider:${action.id}`,
+          actor,
+          toAlly ? (hurtAlly(actor, toAlly, context) ?? actor) : actor,
+          context,
+          undefined,
+          slotLevel,
+        ),
         // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
         ...(onTargets
           ? targets.flatMap((target) =>
@@ -265,11 +274,49 @@ export function castRiders(
   };
 }
 
+// Undead Vitality: the most hurt of the caster's allies of these types near it, if one is hurt at all.
+function hurtAlly(
+  caster: Actor,
+  near: { readonly creatureTypes: readonly string[]; readonly within: number },
+  context: Context,
+): Actor | null {
+  const hurt = Object.values(context.state.actors)
+    .filter(
+      (item) =>
+        item.side === caster.side &&
+        item.hp > 0 &&
+        distanceFeet(item.position, caster.position) <= near.within &&
+        near.creatureTypes.includes(
+          (deriveStats(item, context).creatureType ?? "").toLowerCase(),
+        ),
+    )
+    .map((item) => ({
+      item,
+      missing: deriveStats(item, context).maxHp - item.hp,
+    }))
+    .sort((a, b) => b.missing - a.missing)[0];
+  return hurt && hurt.missing > 0 ? hurt.item : null;
+}
+
 // Persistent Conjuration: the bonus to the save to keep Concentration on a Conjuration spell.
 // shortcut: the spellcasting modifier, rather than the one the feat raised, which it usually is.
 export function concentrationBonus(actor: Actor, context: Context): number {
   const stats = deriveStats(actor, context);
-  return riding(stats, schoolOf(actor.concentratingOn, context), "persistent")
-    ? Math.max(0, spellModifier(stats))
-    : 0;
+  // Bladesong's Focus: a bonus only to these saves.
+  const focus = actor.activeEffects.reduce(
+    (sum, { modifier }) =>
+      modifier.kind === "bonus" &&
+      modifier.to === "saves" &&
+      modifier.concentration
+        ? sum +
+          evaluateFormula(modifier.amount.bonus ?? { base: 0, add: [] }, stats)
+        : sum,
+    0,
+  );
+  return (
+    focus +
+    (riding(stats, schoolOf(actor.concentratingOn, context), "persistent")
+      ? Math.max(0, spellModifier(stats))
+      : 0)
+  );
 }
