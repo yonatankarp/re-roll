@@ -15,7 +15,14 @@ import { deriveStats, lookup } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { levelTo } from "./class-features.ts";
 import { BOOK_ROOTS } from "./depth.ts";
 
-const PLUGINS = ["phb", "dmg", "xanathars-guide", "heroes-of-faerun"];
+const PLUGINS = [
+  "phb",
+  "dmg",
+  "xanathars-guide",
+  "heroes-of-faerun",
+  "arcana-unleashed",
+  "sword-coast-guide",
+];
 const BOOKS =
   BOOK_ROOTS && PLUGINS.every((id) => existsSync(`books/rules/${id}`));
 
@@ -24,6 +31,7 @@ function fighter(
   run: RunContext,
   features: readonly string[],
   items: readonly string[] = [],
+  picks: Readonly<Record<string, string>> = {}, // a variant picked, by feature
 ): Actor {
   const built = levelTo(run, "phb:class/fighter", null, 5);
   if (built.source.kind !== "character" || !built.source.build) {
@@ -35,7 +43,14 @@ function fighter(
     answers: [
       ...entry.answers,
       ...(index === 0
-        ? [{ kind: "features" as const, values: [...features] }]
+        ? [
+            { kind: "features" as const, values: [...features] },
+            ...Object.entries(picks).map(([feature, value]) => ({
+              kind: "variant" as const,
+              feature,
+              values: [value],
+            })),
+          ]
         : []),
     ],
   }));
@@ -104,5 +119,50 @@ describe.skipIf(!BOOKS)("the books' senses, movement and extra actions", () => {
     expect(JSON.stringify(jump.activation)).toContain("jumpBoost");
     const daylight = lookup(run, SpellSchema, "phb:spell/daylight");
     expect(JSON.stringify(daylight.activation)).toContain("disperse");
+  });
+
+  it("adds Indomitable Teleport's teleport to Indomitable, Song of Victory's damage, and Aura of Malevolence typed by Dread Allegiance", () => {
+    const effectsOf = (actor: Actor, feature: string) =>
+      JSON.stringify(
+        deriveStats(actor, run).actions.find((item) =>
+          item.id.startsWith(`feature:${feature}:`),
+        )?.activation.resolution,
+      );
+    const archer = fighter(run, [
+      "phb:feature/fighter-indomitable",
+      "arcana-unleashed:feature/fighter-arcane-archer-indomitable-teleport",
+    ]);
+    expect(effectsOf(archer, "phb:feature/fighter-indomitable")).toContain(
+      '{"kind":"teleport","feet":60',
+    );
+    const singer = fighter(run, [
+      "sword-coast-guide:feature/wizard-bladesinging-song-of-victory",
+    ]);
+    expect(deriveStats(singer, run).passives).toContainEqual(
+      expect.objectContaining({ kind: "weaponRider", with: "meleeWeapon" }),
+    );
+    const allegiance =
+      "heroes-of-faerun:feature/rogue-scion-of-the-three-dread-allegiance";
+    const bloodthirst =
+      "heroes-of-faerun:feature/rogue-scion-of-the-three-bloodthirst";
+    const scion = fighter(
+      run,
+      [
+        bloodthirst,
+        allegiance,
+        "heroes-of-faerun:feature/rogue-scion-of-the-three-aura-of-malevolence",
+      ],
+      [],
+      { [allegiance]: "myrkul" },
+    );
+    const aura = effectsOf(scion, bloodthirst);
+    expect(aura).toContain('"kind":"foesTake"');
+    expect(aura).toContain('"type":"necrotic"');
+    expect(deriveStats(scion, run).passives).toContainEqual(
+      expect.objectContaining({
+        kind: "overcomeResistance",
+        damage: ["necrotic"],
+      }),
+    );
   });
 });

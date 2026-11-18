@@ -45,11 +45,12 @@ import { finalDamage, rollD20 } from "../rules.ts";
 import {
   DECLINE,
   ITEM_PREFIX,
+  STAY,
   itemUseOf,
   spellOfSource,
   WEAPON_PREFIX,
 } from "./ids.ts";
-import { teleportFrame } from "./movement.ts";
+import { teleportFrame, teleportSquares } from "./movement.ts";
 import {
   actorOf,
   allies,
@@ -61,6 +62,7 @@ import {
   sizeOf,
   SIZES,
   SPLITS,
+  squareName,
 } from "./queries.ts";
 import {
   damageEvents,
@@ -386,7 +388,7 @@ function foretoldFor(bearer: Actor, roll: Roll, want: boolean): number | null {
   return (want ? fits[0] : fits.at(-1)) ?? null;
 }
 
-// Reweave Fate's Temporary Hit Points, once the roll it changed succeeds.
+// Reweave Fate's Temporary Hit Points, once the roll it changed succeeds, and Indomitable Teleport's teleport.
 export function rollRewards(
   reactor: Actor,
   action: KnownAction,
@@ -395,14 +397,67 @@ export function rollRewards(
   success: boolean,
   context: Context,
 ): SystemEvent[] {
-  return tempHp && success
-    ? leafEvents(
-        [{ kind: "tempHp", amount: tempHp }],
-        action.id,
-        reactor,
-        roller,
-        context,
-      )
+  if (!success) return [];
+  return [
+    ...(tempHp
+      ? leafEvents(
+          [{ kind: "tempHp", amount: tempHp }],
+          action.id,
+          reactor,
+          roller,
+          context,
+        )
+      : []),
+    ...successTeleport(reactor, action, context),
+  ];
+}
+
+// A teleport once the roll succeeds: the player picks the square; others land as far from their foes as they can.
+// shortcut: it lands without what a walk's end sets off (finishMove), since a roll settles inside other work.
+function successTeleport(
+  reactor: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  const jump = teleportOf(action);
+  if (jump?.kind !== "teleport" || !reactor.position) return [];
+  const squares = teleportSquares(
+    reactor,
+    jump.feet,
+    0,
+    context.state,
+    context,
+  );
+  if (squares.length === 0) return [];
+  const foes = enemies(context.state, reactor).filter(
+    (item) => !isDown(item) && item.position,
+  );
+  const gap = (square: Square) =>
+    Math.min(
+      Infinity,
+      ...foes.map((foe) => distanceFeet(square, foe.position)),
+    );
+  const fallback = squares.reduce((best, square) =>
+    gap(square) > gap(best) ? square : best,
+  );
+  const answer =
+    reactor.id === PLAYER_ACTOR && context.ask
+      ? context.ask({
+          id: `${NS}:teleportTo:${reactor.id}:${action.id}`,
+          actor: reactor.id,
+          prompt: `Where does ${reactor.name} teleport to?`,
+          options: [
+            ...squares.map((square) => ({
+              id: squareKey(square),
+              label: squareName(square),
+            })),
+            { id: STAY, label: "Stay where you are" },
+          ],
+        })
+      : squareKey(fallback);
+  const to = squares.find((square) => squareKey(square) === answer);
+  return to
+    ? [dndEvent(`${NS}:moved`, { actor: reactor.id, to, feet: 0 })]
     : [];
 }
 

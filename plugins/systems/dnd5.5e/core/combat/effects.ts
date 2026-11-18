@@ -3066,23 +3066,26 @@ export function leafEvents(
           )
           .slice(0, creatures);
         for (const foe of foes) {
-          const responses = damageResponses(foe, context);
-          events.push(
-            ...dealEvents(
-              foe,
-              damage.map(({ amount, type }) => ({
-                amount: finalDamage(
-                  rollAmount(amount, stats, context.dice),
-                  type,
-                  responses,
-                ),
-                type,
-              })),
-              false,
-              context,
-              caster,
-            ).events,
+          // the bearer's Resistance-piercing for this source, as Aura of Malevolence's with Bloodthirst
+          const responses = piercing(
+            damageResponses(foe, context),
+            [],
+            stats,
+            sourceId,
           );
+          // none dealt, as with an Intelligence modifier of 0 or less, sets nothing off
+          const hits = damage
+            .map(({ amount, type }) => ({
+              amount: finalDamage(
+                rollAmount(amount, stats, context.dice),
+                type,
+                responses,
+              ),
+              type,
+            }))
+            .filter((hit) => hit.amount !== 0);
+          if (hits.length === 0) continue;
+          events.push(...dealEvents(foe, hits, false, context, caster).events);
         }
         break;
       }
