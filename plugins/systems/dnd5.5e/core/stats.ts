@@ -3194,8 +3194,13 @@ function spellCompanions(
   access: ContentAccess,
 ): Passive[] {
   return [...knownSpells].flatMap((spellId) => {
-    const spell = SpellSchema.safeParse(access.content(spellId)).data;
-    return spell?.companion
+    // Only a spell that names a companion is parsed, and through the cache: this runs on every deriveStats.
+    const raw = access.content(spellId);
+    if (!raw || !("companion" in raw)) {
+      return [];
+    }
+    const spell = lookup(access, SpellSchema, spellId);
+    return spell.companion
       ? [
           {
             kind: "lastingCompanion" as const,
