@@ -139,6 +139,7 @@ import {
   tableOf,
   tableRoll,
 } from "./reactions.ts";
+import { channelPickFrame } from "./school.ts";
 import { summonEvents } from "./summon.ts";
 import { fueledDamage } from "./school.ts";
 import {
@@ -1447,6 +1448,27 @@ export function tempHpBonus(stats: Stats): number {
   );
 }
 
+// A channeled face kept on the target until a rest or until it's unleashed, replacing one kept before.
+export function channelEvents(
+  from: string,
+  face: number,
+  caster: Actor,
+  target: Actor,
+): SystemEvent[] {
+  return [
+    dndEvent(`${NS}:effectAdded`, {
+      actor: target.id,
+      effect: {
+        sourceId: `channel:${from}`,
+        casterId: caster.id,
+        modifier: { kind: "channeled", from, face },
+        ends: "spellDuration",
+        lingers: 1,
+      },
+    }),
+  ];
+}
+
 // A Berserker Axe's fury: another creature's damage calls for a save, failed into a fury (combat/madness.ts).
 function furyEvents(target: Actor, context: Context): SystemEvent[] {
   const damager = currentActor(context.state);
@@ -2016,6 +2038,28 @@ export function leafEvents(
   const unhealed = healingStopped(target, context.state, context);
   for (const effect of effects) {
     switch (effect.kind) {
+      case "channel": {
+        if (effect.pick) break; // picked by a decision (resolveAction)
+        const sides = stats.scaling[effect.dieSize] ?? 6;
+        const twice = stats.passives.some(
+          (passive) =>
+            passive.kind === "tableTwice" && passive.from === effect.from,
+        );
+        const first = context.dice.roll(sides);
+        const second = twice ? context.dice.roll(sides) : 0;
+        const face =
+          twice && first === second ? sides : Math.max(first, second);
+        events.push(
+          dndEvent(`${NS}:dieRolled`, {
+            actor: caster.id,
+            die: sides,
+            rolled: face,
+            label: "Channel",
+          }),
+          ...channelEvents(effect.from, face, caster, target),
+        );
+        break;
+      }
       case "recoil": {
         const type = deriveStats(target, context).creatureType;
         if (
@@ -4659,7 +4703,27 @@ export function resolveAction(
           }
           if (effect.kind === "rollTable") {
             const table = tableOf(effect.from, context);
-            if (table) {
+            // A channeled spirit is unleashed: its kept face, and the effect that kept it ends.
+            const kept = effect.channeled
+              ? actor.activeEffects.find(
+                  ({ modifier }) =>
+                    modifier.kind === "channeled" &&
+                    modifier.from === effect.from,
+                )
+              : undefined;
+            const face =
+              kept?.modifier.kind === "channeled"
+                ? kept.modifier.face
+                : undefined;
+            if (table && (!effect.channeled || face !== undefined)) {
+              if (kept) {
+                events.push(
+                  dndEvent(`${NS}:effectEnded`, {
+                    actor: actor.id,
+                    sourceId: kept.sourceId,
+                  }),
+                );
+              }
               const rolled = tableRoll(
                 table,
                 action,
@@ -4668,9 +4732,20 @@ export function resolveAction(
                 target,
                 slotLevel ?? action.spellLevel ?? 0,
                 context,
+                face,
               );
               events.push(...rolled.events);
               frames.push(...rolled.frames);
+            }
+          }
+          if (effect.kind === "channel" && effect.pick) {
+            const table = tableOf(effect.from, context);
+            const sides =
+              deriveStats(actor, context).scaling[effect.dieSize] ?? 6;
+            if (table) {
+              frames.push(
+                channelPickFrame(actor, effect.from, table, sides, target),
+              );
             }
           }
           if (effect.kind === "randomAction") {

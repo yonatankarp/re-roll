@@ -113,6 +113,7 @@ export const FRAME_KINDS = [
   "reincarnateAnswer",
   "missReroll", // a missed attack rolled again, or at another creature, as Master Duelist or Curving Shot (class-rules.ts)
   "bringAlong", // the allies a teleport brings land beside it, as Travel along the Tree's (combat/movement.ts)
+  "tablePick", // a table's row picked, as Tamed Surge's or Controlled Chaos's (combat/school.ts)
   "riderChoice", // what a spell's cast rider does, picked once it's done, as Steps of the Fey's (combat/school.ts)
   "redirectHit", // where a missed attack lands instead, as Tipsy Sway's Redirect Attack (combat/reactions.ts)
   "hideNow", // the Hide action as part of another, as Shrouding Spells' (actions.ts)

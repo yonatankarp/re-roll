@@ -5,7 +5,12 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
-import { ClassSchema, type Passive, SpellSchema } from "../schemas.ts";
+import {
+  ClassSchema,
+  type Passive,
+  SpellSchema,
+  type Table,
+} from "../schemas.ts";
 import { type Actor, dndEvent, frame, isDown, NS } from "../state.ts";
 import { distanceFeet } from "../grid.ts";
 import {
@@ -20,7 +25,7 @@ import {
 } from "../stats.ts";
 import { HIT_DICE, spellOfSource } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
-import { leafEvents, rollSave } from "./effects.ts";
+import { channelEvents, leafEvents, rollSave } from "./effects.ts";
 import { tableOf, tableRoll } from "./reactions.ts";
 import { teleportFrame } from "./movement.ts";
 import type { Context } from "./queries.ts";
@@ -201,6 +206,9 @@ export function castRiders(
     ) {
       return [];
     }
+    if (passive.refills && (actor.resourcesSpent[passive.refills] ?? 0) === 0) {
+      return [];
+    }
     // Wild Magic Surge: a spell of the class's list cast with a slot, once a turn behind its die.
     if (passive.classes) {
       const spellId = spellOfSource(action.id);
@@ -271,50 +279,91 @@ export function castRiders(
             context,
           );
         });
-  // A surge's table, rolled at the spell's first target, as the Wild Magic Surge table.
-  const tables = rides.flatMap(({ rollTable }) => {
+  // A surge's table, rolled at the spell's first target, as the Wild Magic Surge table; picked from all its rows but
+  // the last with Tamed Surge, or from two rolls with Controlled Chaos.
+  const aimed = targets.find((target) => target.id !== actor.id);
+  const level = slotLevel ?? action.spellLevel;
+  const tables = rides.flatMap(({ rollTable, pick, resource }) => {
     const table = rollTable ? tableOf(rollTable, context) : undefined;
-    return table
-      ? [
-          tableRoll(
-            table,
-            action,
-            actor,
-            undefined,
-            targets.find((target) => target.id !== actor.id),
-            slotLevel ?? action.spellLevel ?? 0,
-            context,
-          ),
-        ]
-      : [];
+    if (!rollTable || !table) return [];
+    const twice = stats.passives.some(
+      (passive) => passive.kind === "tableTwice" && passive.from === rollTable,
+    );
+    if (!pick && !twice) {
+      return [
+        tableRoll(table, action, actor, undefined, aimed, level, context),
+      ];
+    }
+    const events: SystemEvent[] = [];
+    const faces = pick
+      ? table.rows.slice(0, -1).map((row) => row.min)
+      : [1, 2].map(() => {
+          const face = context.dice.roll(table.die);
+          events.push(
+            dndEvent(`${NS}:dieRolled`, {
+              actor: actor.id,
+              die: table.die,
+              rolled: face,
+              label: action.name,
+            }),
+          );
+          return face;
+        });
+    return [
+      {
+        events,
+        frames: [
+          tablePickFrame(actor, rollTable, table, faces, pick === true, {
+            actionId: action.id,
+            name: action.name,
+            spellLevel: level,
+            ...(aimed ? { target: aimed.id } : {}),
+            ...(pick && resource ? { resource } : {}),
+          }),
+        ],
+        negate: false,
+      },
+    ];
   });
   return {
     events: [
       ...surged,
       ...mended,
       ...tables.flatMap((rolled) => rolled.events),
-      ...rides.flatMap(({ effects, onTargets, resource, toAlly }) => [
-        ...(resource
-          ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
-          : []),
-        ...leafEvents(
-          effects,
-          `castRider:${action.id}`,
-          actor,
-          toAlly ? (hurtAlly(actor, toAlly, context) ?? actor) : actor,
-          context,
-          undefined,
-          slotLevel,
-        ),
-        // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
-        ...(onTargets
-          ? targets.flatMap((target) =>
-              target.id === actor.id
-                ? []
-                : leafEvents(onTargets, action.id, actor, target, context),
-            )
-          : []),
-      ]),
+      ...rides.flatMap(
+        ({ effects, onTargets, resource, toAlly, pick, refills }) => [
+          // A pick's use is spent once a row is picked (tablePickFrames).
+          ...(resource && !pick
+            ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
+            : []),
+          ...(refills
+            ? [
+                dndEvent(`${NS}:resourceRestored`, {
+                  actor: actor.id,
+                  resource: refills,
+                  amount: 1,
+                }),
+              ]
+            : []),
+          ...leafEvents(
+            effects,
+            `castRider:${action.id}`,
+            actor,
+            toAlly ? (hurtAlly(actor, toAlly, context) ?? actor) : actor,
+            context,
+            undefined,
+            slotLevel,
+          ),
+          // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
+          ...(onTargets
+            ? targets.flatMap((target) =>
+                target.id === actor.id
+                  ? []
+                  : leafEvents(onTargets, action.id, actor, target, context),
+              )
+            : []),
+        ],
+      ),
     ],
     frames: [
       ...tables.flatMap((rolled) => rolled.frames),
@@ -339,6 +388,123 @@ export function castRiders(
 }
 
 const SURGE = "wild-magic-surge";
+
+// A row of a table picked rather than rolled, as Tamed Surge's or Controlled Chaos's: rows not `harmful` are listed
+// first, so tactics take the first (policy.ts); a pick made by choice may also be none.
+function tablePickFrame(
+  actor: Actor,
+  from: string,
+  table: Table,
+  faces: readonly number[],
+  optional: boolean,
+  roll: z.infer<typeof TablePickSchema>["roll"],
+): Frame {
+  const rowOf = (face: number) =>
+    table.rows.find((row) => row.min <= face && face <= row.max);
+  const options = [...new Set(faces)]
+    .map((face) => {
+      const row = rowOf(face);
+      return {
+        id: String(face),
+        label:
+          optional && row
+            ? `${roll.name}: ${String(row.min)}–${String(row.max)}`
+            : `${roll.name}: ${String(face)}`,
+        harmful: row?.harmful === true,
+      };
+    })
+    .sort((a, b) => Number(a.harmful) - Number(b.harmful))
+    .map(({ id, label }) => ({ id, label }));
+  return awaitDecision({
+    id: `${NS}:tablePick:${actor.id}:${from}`,
+    actor: actor.id,
+    prompt: `${roll.name}: which result?`,
+    options: [...options, ...(optional ? [{ id: NONE, label: "None" }] : [])],
+    resume: frame("tablePick", { actor: actor.id, from, roll }),
+  });
+}
+
+// Controlled Channeling: a face picked, no higher than the die allows, and kept as channeled.
+export function channelPickFrame(
+  actor: Actor,
+  from: string,
+  table: Table,
+  sides: number,
+  target: Actor,
+): Frame {
+  const faces = table.rows
+    .map((row) => row.min)
+    .filter((face) => face <= sides);
+  return tablePickFrame(actor, from, table, faces, false, {
+    actionId: from,
+    name: "Channel",
+    spellLevel: 0,
+    target: target.id,
+    channel: true,
+  });
+}
+
+const TablePickSchema = z.object({
+  actor: z.string(),
+  from: z.string(),
+  roll: z.object({
+    actionId: z.string(),
+    name: z.string(),
+    spellLevel: z.number().int(),
+    target: z.string().optional(),
+    resource: z.string().optional(), // spent once a row is picked
+    channel: z.literal(true).optional(), // the face is kept as channeled, not resolved now
+  }),
+  answer: z.string(),
+});
+
+export const tablePickFrames = {
+  [`${NS}:tablePick`]: frameHandler({
+    schema: TablePickSchema,
+    run: ({ actor: actorId, from, roll, answer }, context: Context) => {
+      const actor = context.state.actors[actorId];
+      const table = tableOf(from, context);
+      if (!actor || !table || answer === NONE) return {};
+      const action: KnownAction = {
+        id: roll.actionId,
+        name: roll.name,
+        activation: {
+          cost: [],
+          targeting: { self: true },
+          resolution: { kind: "automatic", damage: [], effects: [] },
+        },
+        spellLevel: roll.spellLevel,
+      };
+      const target = roll.target
+        ? context.state.actors[roll.target]
+        : undefined;
+      if (roll.channel) {
+        return {
+          events: channelEvents(from, Number(answer), actor, target ?? actor),
+        };
+      }
+      const spent = roll.resource
+        ? [
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: actor.id,
+              resource: roll.resource,
+            }),
+          ]
+        : [];
+      const rolled = tableRoll(
+        table,
+        action,
+        actor,
+        undefined,
+        target,
+        roll.spellLevel,
+        context,
+        Number(answer),
+      );
+      return { events: [...spent, ...rolled.events], frames: rolled.frames };
+    },
+  }),
+};
 
 type Choice = NonNullable<
   Extract<Passive, { kind: "castRider" }>["choices"]

@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { LeafEffect } from "../schemas.ts";
 import { SpellSchema } from "../schemas.ts";
 import { type Actor, dndEvent, frame, NS } from "../state.ts";
-import { doesSomething } from "../stats.ts";
+import { doesSomething, onClassList } from "../stats.ts";
 import type { Context } from "./queries.ts";
 
 // Wish's copy of another spell: the caster picks one that plays on the grid, and casts it without its costs before
@@ -19,7 +19,10 @@ export function wishFrame(
     const spell = SpellSchema.safeParse(context.content(id)).data;
     return spell?.activation &&
       spell.level <= effect.maxLevel &&
-      (spell.lasting || doesSomething(spell.activation.resolution))
+      (spell.lasting || doesSomething(spell.activation.resolution)) &&
+      (!effect.classes || onClassList(spell, effect.classes)) &&
+      (!effect.noReaction || !spell.activation.cost.includes("reaction")) &&
+      (!effect.spells || effect.spells.includes(spell.id))
       ? [spell]
       : [];
   });

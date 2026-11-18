@@ -851,6 +851,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("confused"),
     spell: z.literal(true).optional(),
   }),
+  // A face rolled on the table `from` holds, kept until it's unleashed by a `rollTable` with `channeled`, as a
+  // spirit channeled with Spirits from Beyond (combat/effects.ts).
+  z.strictObject({
+    kind: z.literal("channeled"),
+    from: ContentIdSchema,
+    face: z.number().int().min(1),
+  }),
   // In a fury (passive `fury`): on its turns it attacks the nearest creature it reaches, friend or foe, or with `at`
   // that creature until either drops (combat/madness.ts).
   z.strictObject({ kind: z.literal("furious"), at: z.string().optional() }),
@@ -987,7 +994,22 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // A roll on the table the content entry `from` holds (its `table`, TableSchema), as a Wand of Wonder's effects
   // (combat/reactions.ts tableRoll), aimed at the action's target.
-  z.strictObject({ kind: z.literal("rollTable"), from: ContentIdSchema }),
+  // With `channeled` the face kept by `channel` is used, and the channeled effect ends.
+  z.strictObject({
+    kind: z.literal("rollTable"),
+    from: ContentIdSchema,
+    channeled: z.literal(true).optional(),
+  }),
+  // A face of the table `from` holds, rolled on a d`dieSize` (a scaling key, as `bardicDie`) and kept on the target
+  // until a rest or until it's unleashed, as Spirits from Beyond's spirit; with `pick` the bearer picks the face, as
+  // Controlled Channeling. A new one replaces the one kept. shortcut: with a pick of two (`tableTwice`), the higher
+  // face is kept, or on doubles the highest the die allows, as Mystical Connection.
+  z.strictObject({
+    kind: z.literal("channel"),
+    from: ContentIdSchema,
+    dieSize: z.string().min(1),
+    pick: z.literal(true).optional(),
+  }),
   // Damage to the one taking the action, with `creatureTypes` only when the target is one of these, as Blackrazor's
   // 1d10 Necrotic to its wielder for hitting an Undead or a Book of Vile Darkness's Vile Speech to its reader.
   z.strictObject({
@@ -1572,9 +1594,15 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // The caster picks another spell of this level or lower that plays on the grid, and it takes effect without its
   // costs, as Wish's (combat/wish.ts).
+  // With `classes`, only spells of these classes' lists (by name after the plugin), and with `noReaction` none cast
+  // as a Reaction, as Divine Intervention's Cleric spells; with `spells` only these, as Greater Divine Intervention's
+  // Wish.
   z.strictObject({
     kind: z.literal("copySpell"),
     maxLevel: z.number().int().min(0).max(9),
+    classes: z.array(z.string().min(1)).min(1).optional(),
+    noReaction: z.literal(true).optional(),
+    spells: z.array(ContentIdSchema).min(1).optional(),
   }),
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
   // A dying creature becomes Stable, as with Spare the Dying.
@@ -2936,6 +2964,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Reads any Spell Scroll with this ability, cantrips and level 1 spells reliably and a higher one behind a check of
   // it with Arcana of 10 plus the spell's level, whose failure wastes the scroll, as Use Magic Device's (stats.ts).
   z.strictObject({ kind: z.literal("anyScroll"), ability: AbilitySchema }),
+  // Rolling on the table `from` holds, the bearer rolls twice and picks, as Controlled Chaos (combat/school.ts).
+  z.strictObject({ kind: z.literal("tableTwice"), from: ContentIdSchema }),
   // Attuned to up to this many magic items at once, as an Artificer's Magic Item Adept's four (gear.ts).
   z.strictObject({
     kind: z.literal("attunementSlots"),
@@ -3458,8 +3488,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
         at: z.number().int().min(1),
       })
       .optional(),
-    // the table the content entry `from` holds is rolled on, aimed at the spell's first target (combat/school.ts)
+    // the table the content entry `from` holds is rolled on, aimed at the spell's first target (combat/school.ts),
+    // or with `pick` the caster picks its row, any but the last, as Tamed Surge
     rollTable: ContentIdSchema.optional(),
+    pick: z.literal(true).optional(),
+    // only while this resource has a use spent, which it gives back, as Tides of Chaos regained by a Sorcerer spell
+    refills: z.string().min(1).optional(),
     // its `effects` go to the most hurt of the bearer's allies of these types within `within` instead, as Undead
     // Vitality's healing of an Undead
     toAlly: z
