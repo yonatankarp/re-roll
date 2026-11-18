@@ -14208,6 +14208,7 @@
     your spell save DC to move at all. If it fails the check, it can’t move. A
     creature that moves out of the wall falls to the ground.
   automation: text
+  # A minute to cast, which a fight can spend only through Longer Casting Times (re-roll#205).
   outOfCombat: castingTime
 - id: srd52:spell/wall-of-fire
   name: Wall of Fire
