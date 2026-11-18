@@ -35,13 +35,15 @@ export function onceEnded(
   actor: Actor,
   on: "attacks" | "attacksAgainst",
   attackerId?: string,
+  weapon = true, // a weapon attack, which Frostbite's Disadvantage waits for
 ): SystemEvent[] {
   return actor.activeEffects.flatMap((effect) => {
     const { modifier, sourceId } = effect;
     return (forAttacker(effect, attackerId) &&
       (modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
       modifier.on === on &&
-      modifier.once) ||
+      modifier.once &&
+      (weapon || modifier.kind !== "disadvantage" || !modifier.weapon)) ||
       (modifier.kind === "bonus" && modifier.to === on && modifier.once)
       ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId })]
       : [];

@@ -29,7 +29,12 @@ import {
   rollDiceNotation,
   scaledDice,
 } from "./stats.ts";
-import { HIT_DICE, spellOfSource, weaponItemId } from "./combat/ids.ts";
+import {
+  HIT_DICE,
+  itemUseOf,
+  spellOfSource,
+  weaponItemId,
+} from "./combat/ids.ts";
 import { walkSpeed } from "./tactics.ts";
 import { schoolOf } from "./combat/school.ts";
 
@@ -195,10 +200,15 @@ export function markedBy(
       ids.some(
         (id) =>
           sourceId.startsWith(`feature:${id}:`) ||
-          spellOfSource(sourceId) === id,
+          spellOfSource(sourceId) === id ||
+          ofItem(itemUseOf(sourceId), id),
       ),
   );
 }
+
+// Whether an item's id is this magic item or a version made from it, as an Oathbow made as a Longbow.
+const ofItem = (item: string | null, id: string): boolean =>
+  item !== null && (item === id || item.startsWith(`${id}--`));
 
 function attackAdvantaged(
   passive: Extract<Passive, { kind: "attackAdvantage" }>,
@@ -311,8 +321,12 @@ export function piercing<
   stats: Stats,
   source = "", // the action or effect source the damage comes from, for `sources`
 ): T {
+  // A magic weapon's own, as a Vorpal Sword's, names its magic item: any weapon made from it counts.
+  const weapon = weaponItemId(source);
   const from = (id: string) =>
-    source.startsWith(`feature:${id}:`) || spellOfSource(source) === id;
+    source.startsWith(`feature:${id}:`) ||
+    spellOfSource(source) === id ||
+    (weapon !== "" && (weapon === id || weapon.startsWith(`${id}--`)));
   const ignored = [
     ...mastered,
     ...stats.passives.flatMap((passive) =>
