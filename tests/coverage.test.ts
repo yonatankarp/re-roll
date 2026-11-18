@@ -7,6 +7,7 @@ import {
   type Heading,
   checkCoverage,
   classifyBook,
+  coverageFails,
   formatCoverage,
   headingsOf,
   indexEntities,
@@ -353,6 +354,39 @@ describe("the coverage report", () => {
     expect(
       report.entities.find((item) => item.id === "hb:condition/dizzy")?.lore,
     ).toBe(true);
+  });
+
+  it("fails on a heading that is neither linked nor structural", async () => {
+    const book = (entities: string): Record<string, string> => ({
+      "books/rules/hb/plugin.yaml": files["books/rules/hb/plugin.yaml"] ?? "",
+      "books/rules/hb/deities/all.yaml": entities,
+      "books/library/hb/0001-gods.md": "# Chapter 1: Gods\n## Gloom\n",
+      "books/coverage/hb.yaml": "rules:\n  - { levels: [2], is: deity }\n",
+    });
+    const run = async (book: Record<string, string>) => {
+      const storage = {
+        read: (path: string) => Promise.resolve(book[path] ?? null),
+        list: (prefix: string) =>
+          Promise.resolve(
+            Object.keys(book)
+              .filter((path) => path.startsWith(`${prefix}/`))
+              .map((path) => ({ path, symlink: false })),
+          ),
+      };
+      return checkCoverage(
+        storage,
+        ["books"],
+        await scanPlugins(storage, ["books"]),
+        [system],
+      );
+    };
+    const unlinked = await run(book("[]\n"));
+    expect(formatCoverage(unlinked)[1]).toBe(
+      "  hb: 2 headings: 0 linked, 1 structural, 1 missing (deity 1)",
+    );
+    expect(coverageFails(unlinked)).toBe(true);
+    const linked = await run(book("- id: hb:deity/gloom\n  name: Gloom\n"));
+    expect(coverageFails(linked)).toBe(false);
   });
 
   it("reports no books when there is no library", async () => {

@@ -554,6 +554,13 @@ export async function checkCoverage(
   return { books, entities, issues };
 }
 
+// A library heading with no entity, or a bad link, fails check-pack.
+export const coverageFails = (report: CoverageReport): boolean =>
+  report.issues.length > 0 ||
+  report.books.some(({ verdicts }) =>
+    verdicts.some((verdict) => verdict.status === "missing"),
+  );
+
 // One line per book, then the missing headings by the kind of entity each should have.
 export function formatCoverage(report: CoverageReport): string[] {
   const count = (verdicts: readonly Verdict[], status: Status) =>
