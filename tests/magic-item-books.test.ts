@@ -24,7 +24,11 @@ import {
   sceneGearActions,
 } from "../plugins/systems/dnd5.5e/core/gear.ts";
 import { recovered } from "../plugins/systems/dnd5.5e/core/rest.ts";
-import { FeatureSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import {
+  ActivationSchema,
+  FeatureSchema,
+  SpellSchema,
+} from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   damageResponses,
   deriveStats,
@@ -559,5 +563,31 @@ describe.skipIf(!BOOKS)("the book's crafting", () => {
     );
     expect(plans.length).toBeGreaterThan(40);
     expect(plans.filter(({ item }) => !run.content(item))).toEqual([]);
+  });
+});
+
+// A sample of #152's travel, shelters and wards, as the books encode them.
+describe.skipIf(!BOOKS)("the book's wards and travel", () => {
+  it("gives every readied ward an activation that parses", () => {
+    const wards = run.contentIds().flatMap((id) => {
+      const spell = SpellSchema.safeParse(run.content(id)).data;
+      const effects =
+        spell?.scene?.resolution.kind === "automatic"
+          ? spell.scene.resolution.effects
+          : [];
+      return effects.flatMap((effect) =>
+        effect.kind === "modifier" &&
+        effect.modifier.kind === "prepared" &&
+        effect.modifier.activation !== undefined
+          ? [{ id, activation: effect.modifier.activation }]
+          : [],
+      );
+    });
+    expect(wards.length).toBeGreaterThan(8);
+    expect(
+      wards.filter(
+        ({ activation }) => !ActivationSchema.safeParse(activation).success,
+      ),
+    ).toEqual([]);
   });
 });

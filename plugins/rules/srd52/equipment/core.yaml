@@ -152,7 +152,7 @@
   rarity: veryRare
   attunement: false
   text: Reading it casts Teleport without a spell slot, and the scroll crumbles to dust.
-  automation: partial
+  automation: full
   spell: "srd52:spell/teleport"
 - id: "srd52:item/spell-scroll-detect-magic"
   name: Spell Scroll (Detect Magic)
@@ -170,7 +170,7 @@
   rarity: uncommon
   attunement: false
   text: Reading it casts Magic Circle without a spell slot, and the scroll crumbles to dust.
-  automation: partial
+  automation: full
   spell: "srd52:spell/magic-circle"
 - id: "srd52:item/thieves-tools"
   name: Thieves' Tools
