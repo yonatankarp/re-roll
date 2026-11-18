@@ -889,6 +889,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("setScore"),
     ability: AbilitySchema,
     score: z.number().int().min(1),
+    exact: z.literal(true).optional(), // lowering a higher score too, as Wish's stress Strength of 3
   }),
   // No rule of its own: a curse, a mark or a hold that another of its giver's actions looks for (a targeting's
   // `afflicted`), as a nightmare's Haunter's Spear curse.

@@ -364,12 +364,15 @@ function withDcBonus(activation: Activation, bonus: number): Activation {
   ) as Activation;
 }
 
-// Scores an effect on the character sets while it lasts, as a Potion of Giant Strength's, never lowering one.
+// Scores an effect on the character sets while it lasts, as a Potion of Giant Strength's, never lowering one unless
+// `exact`, as Wish's stress Strength of 3.
 function withEffectScores(scores: AbilityScores, actor: Actor): AbilityScores {
   const set = { ...scores };
   for (const { modifier } of actor.activeEffects) {
     if (modifier.kind === "setScore") {
-      set[modifier.ability] = Math.max(set[modifier.ability], modifier.score);
+      set[modifier.ability] = modifier.exact
+        ? modifier.score
+        : Math.max(set[modifier.ability], modifier.score);
     }
   }
   return set;

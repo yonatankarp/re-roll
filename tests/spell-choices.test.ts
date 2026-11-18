@@ -1047,7 +1047,10 @@ describe("Wish", () => {
       (decision: Decision) =>
         decision.id.startsWith(`${NS}:wish:`) ? srd("fireball") : "",
     );
-    const offered = wished.decisions[0]?.options ?? [];
+    const options = wished.decisions[0]?.options ?? [];
+    // Wish's other choices come after the spells (#177).
+    expect(options.map(({ label }) => label)).toContain("Instant Health");
+    const offered = options.filter(({ id }) => !id.startsWith("extra:"));
     const levels = offered.map(({ label }) =>
       Number(/level (\d)/.exec(label)?.[1]),
     );
