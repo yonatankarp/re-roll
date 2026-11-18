@@ -1,5 +1,5 @@
 import { type Game } from "./session.ts";
-import { el, enter, picture } from "./dom.ts";
+import { button, el, enter, picture } from "./dom.ts";
 
 // A book's full picture laid over the page for a moment, as turning to a plate: a foe met for the first
 // time, or a chapter's title page. Only the page shows it, so nothing reaches the log and saves stay
@@ -20,6 +20,17 @@ export interface ArtPlate {
     },
   ) => void;
   readonly close: () => void;
+}
+
+// The plate's way out, a real button so a screen reader finds it, though it never takes focus itself.
+function hint(): HTMLButtonElement {
+  const node = button("Continue", () => undefined); // the plate's own click closes it
+  node.className = "plate-hint";
+  node.setAttribute("aria-keyshortcuts", "Escape");
+  const key = el("kbd", { text: "Esc" });
+  key.setAttribute("aria-hidden", "true");
+  node.append(" ", key);
+  return node;
 }
 
 export function artPlate(): ArtPlate {
@@ -58,7 +69,7 @@ export function artPlate(): ArtPlate {
             {},
             el("span", { class: "plate-kicker", text: kicker }),
             el("strong", { class: "plate-title", text: title }),
-            el("span", { class: "plate-hint", text: "Click to continue" }),
+            hint(),
           ),
         ),
       );

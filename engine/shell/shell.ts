@@ -7,6 +7,7 @@ import { wireTerms } from "./terms.ts";
 import { showBook, showLibrary } from "./library-screen.ts";
 import { resume, showLoad, showMenu } from "./menu-screen.ts";
 import { showSetup } from "./setup-screen.ts";
+import { textSizeControls } from "./text-size.ts";
 
 // An open book whose right page turns, for the busy overlay.
 const BOOK_ICON =
@@ -51,7 +52,12 @@ export function mountShell(
         "div",
         { class: "bar" },
         el("h1", { text: "Re-roll" }),
-        el("nav", { class: "bar-actions" }),
+        el(
+          "div",
+          { class: "bar-end" },
+          el("nav", { class: "bar-actions" }),
+          textSizeControls(),
+        ),
       ),
       notice,
     ),

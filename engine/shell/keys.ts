@@ -6,6 +6,15 @@ export const MOD = MAC ? "⌘" : "Ctrl+";
 export const keyshortcuts = (key: string): string =>
   `Control+${key} Meta+${key}`;
 
+// The letter a shortcut means: the one the layout types, or, on a layout without Latin letters (Hebrew,
+// Cyrillic, Greek), the key in that place on a US keyboard, so Ctrl+S still saves.
+export const letterOf = (event: KeyboardEvent): string => {
+  const key = event.key.toLowerCase();
+  return /^[a-z]$/.test(key)
+    ? key
+    : (/^Key([A-Z])$/.exec(event.code)?.[1]?.toLowerCase() ?? key);
+};
+
 export function wireKeys(ctx: ShellContext): void {
   // Esc puts an error away first, before it means Back.
   document.addEventListener("keydown", (event) => {

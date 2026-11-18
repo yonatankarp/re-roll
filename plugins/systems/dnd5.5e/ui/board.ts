@@ -57,7 +57,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const cursorBox = el("div", "dnd-cursor");
   const field = el("div", "dnd-field plain"); // a parchment mat until a picture loads
   const banner = el("div", "dnd-banner");
-  const hint = el("div", "dnd-hint", "Click to skip");
+  const hint = el("div", "dnd-hint", "Click or press Esc to skip");
   const caption = el("div", "dnd-caption"); // who is doing what, during an attack
   const cells = el("div", "dnd-cells");
   const SVG = "http://www.w3.org/2000/svg";
