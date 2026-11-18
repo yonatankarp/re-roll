@@ -227,7 +227,7 @@ describe("headless play of goblin-ambush", () => {
   it("casts Bless on targets picked one by one, and a save replays them", async () => {
     const saves = await savesFolder();
     const play = await openHeadless(saves);
-    await play.start("goblin-ambush", { seed: "bless" });
+    await play.start("goblin-ambush", { seed: "bless-2" });
     await play.choose("Human Cleric");
     const bless = "spell:srd52:spell/bless|pick";
     for (let count = 0; count < 100; count += 1) {

@@ -12,7 +12,14 @@ import { HIT_DICE, itemUseOf, parseOption } from "../core/combat/ids.ts";
 import { squareKey } from "../core/grid.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
-import { canUse, foundText, sceneGearActions } from "../core/gear.ts";
+import {
+  attunementLimit,
+  boundTo,
+  canAttune,
+  canUse,
+  foundText,
+  sceneGearActions,
+} from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
 import { partySight, revealedSquares, unseenFoe } from "../core/fog.ts";
 import { coins } from "../core/shop.ts";
@@ -46,12 +53,12 @@ import {
   type Actor,
   type DndState,
   EVENT_SCHEMAS,
-  MAX_ATTUNED,
   equipped,
   isDead,
   isDown,
   isStable,
   mountOf,
+  turnId,
 } from "../core/state.ts";
 import { parseState } from "./parse-state.ts";
 import {
@@ -307,7 +314,7 @@ function actorOf(event: SystemEvent, rawState: unknown): string | null {
     event.kind === "dnd5.5e:rollReported" && "payload" in event
       ? EVENT_SCHEMAS["dnd5.5e:rollReported"].parse(event.payload).actor
       : null;
-  const id = reported ?? state.combat?.order[state.combat.index];
+  const id = reported ?? turnId(state.combat);
   return id ? (state.actors[id]?.name ?? null) : null;
 }
 
@@ -504,10 +511,16 @@ function equipmentRows(
           looks: [id],
           value: wornCount === 0 ? "In pack" : "Equipped",
           // Putting on a spare comes first, as between choices. Untrained armor isn't offered, as it would only hinder.
-          ...(changes && (wornCount > 0 || wearable)
+          // A curse holds it, so it can't be stowed.
+          ...(changes &&
+          (wornCount > 0 || wearable) &&
+          !(wornCount === count && boundTo(actor, id, access))
             ? {
                 option:
-                  wornCount < count && wearable
+                  // A spare of the armor or Shield worn would only change places with it (gear.ts).
+                  wornCount < count &&
+                  wearable &&
+                  (item.type === "weapon" || wornCount === 0)
                     ? { id: `equip:${id}`, label: "Equip", hint: GEAR_HINT }
                     : { id: `stow:${id}`, label: "Stow", hint: GEAR_HINT },
               }
@@ -518,12 +531,13 @@ function equipmentRows(
     }
     if (item.type === "magicItem" && item.attunement) {
       const on = attuned.includes(id);
+      const held = on && boundTo(actor, id, access);
       return [
         {
           label,
           looks: [id],
-          value: on ? "Attuned" : "Not attuned",
-          ...(changes
+          value: held ? "Attuned (cursed)" : on ? "Attuned" : "Not attuned",
+          ...(changes && !held
             ? {
                 option: on
                   ? {
@@ -534,10 +548,11 @@ function equipmentRows(
                   : {
                       id: `attune:${id}`,
                       label: "Attune",
-                      hint:
-                        attuned.length < MAX_ATTUNED
+                      hint: !canAttune(actor, item, stats)
+                        ? `Requires attunement by ${item.attunementBy ?? "another"}`
+                        : attuned.length < attunementLimit(stats)
                           ? ATTUNE_HINT
-                          : `Already attuned to ${String(MAX_ATTUNED)} items`,
+                          : `Already attuned to ${String(attunementLimit(stats))} items`,
                     },
               }
             : {}),
@@ -558,7 +573,10 @@ function equipmentRows(
                 hint: actor.hp >= stats.maxHp ? FULL_HINT : DRINK_HINT,
               },
             }
-          : changes && item.type === "magicItem" && item.study
+          : changes &&
+              item.type === "magicItem" &&
+              item.study &&
+              item.study.ability !== "any"
             ? {
                 option: { id: `study:${id}`, label: "Study", hint: STUDY_HINT },
               }
@@ -584,7 +602,7 @@ function equipmentRows(
       ? [
           {
             label: "Attunement",
-            value: `${String(attuned.length)} of ${String(MAX_ATTUNED)}`,
+            value: `${String(attuned.length)} of ${String(attunementLimit(stats))}`,
           },
         ]
       : []),
@@ -943,8 +961,8 @@ function combat(
 ) {
   const state = parseState(rawState);
   if (!state.combat) return null;
-  const { index, round } = state.combat;
-  const acting = state.combat.order[index];
+  const { round } = state.combat;
+  const acting = turnId(state.combat);
   // The foes the party can't see now are left out: off the board, out of the turn order and unweighed.
   const order = state.combat.order.filter(
     (id) => !unseenFoe(state, id, access),

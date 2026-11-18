@@ -15,6 +15,7 @@ import {
   effectiveBuild,
   equipped,
   hasCondition,
+  turnId,
 } from "./state.ts";
 import { lightAt } from "./sight.ts";
 import { currentShape, formKept, formOf, usableIn } from "./forms.ts";
@@ -196,7 +197,7 @@ export interface Stats {
   readonly ordeal: number; // taken from every d20 test after coming back from the dead, as Raise Dead's
   // A stat block's Speeds besides walking. Others come from effects (core/movement-modes.ts).
   readonly speeds: Readonly<
-    Partial<Record<"fly" | "climb" | "burrow", number>>
+    Partial<Record<"fly" | "climb" | "burrow" | "swim", number>>
   >;
   // From magic items worn, and attuned where they need it.
   readonly itemBonuses: Readonly<
@@ -225,18 +226,24 @@ function bestAc(
     armorBases: readonly number[];
     flatBonus: number;
     passives: readonly Passive[];
+    armorTypes?: readonly string[]; // the armor worn: none for a monster's printed AC
+    shielded?: boolean;
+    proficiency?: number;
   },
 ): number {
   const dex = abilityModifier(abilities.dex);
+  const armorTypes = context.armorTypes ?? [];
   // Only one way of calculating AC applies at a time, so the best one is used.
   const bases = [10 + dex, ...context.armorBases];
   const fixed = passiveModifiers(context.passives);
-  // shortcut: Mage Armor's and Unarmored Defense's rule about not wearing armor isn't checked, since the best calculation wins anyway.
+  // shortcut: Mage Armor's rule about not wearing armor isn't checked, since the best calculation wins anyway.
   for (const modifier of [
     ...actor.activeEffects.map((effect) => effect.modifier),
     ...fixed,
   ]) {
     if (modifier.kind !== "acFormula") continue;
+    if (modifier.unarmored && armorTypes.length > 0) continue;
+    if (modifier.noShield && context.shielded) continue;
     const { base, add } = modifier.formula;
     bases.push(
       add.reduce(
@@ -248,26 +255,42 @@ function bestAc(
       ),
     );
   }
+  // A flat AC bonus, its ability modifiers worked out, as Bladesong's Intelligence; one tied to armor only with it on.
+  const flat = (
+    modifier: Actor["activeEffects"][number]["modifier"],
+  ): number | null => {
+    if (
+      modifier.kind !== "bonus" ||
+      modifier.to !== "ac" ||
+      modifier.melee ||
+      modifier.ranged ||
+      (modifier.armor === "any" && armorTypes.length === 0) ||
+      (modifier.armor === "heavy" && !armorTypes.includes("heavy"))
+    ) {
+      return null;
+    }
+    const formula = modifier.amount.bonus;
+    if (!formula) return 0;
+    const sum = formula.add.reduce(
+      (total, term) =>
+        term.kind === "abilityMod"
+          ? total + abilityModifier(abilities[term.ability])
+          : term.kind === "proficiency"
+            ? total + (context.proficiency ?? 0)
+            : total,
+      formula.base,
+    );
+    return formula.min === undefined ? sum : Math.max(formula.min, sum);
+  };
   let bonus = fixed.reduce(
-    (total, modifier) =>
-      modifier.kind === "bonus" &&
-      modifier.to === "ac" &&
-      !modifier.melee &&
-      !modifier.ranged
-        ? total + (modifier.amount.bonus?.base ?? 0)
-        : total,
+    (total, modifier) => total + (flat(modifier) ?? 0),
     context.flatBonus,
   );
   const seen = new Set<string>();
   for (const effect of actor.activeEffects) {
-    const { modifier } = effect;
-    if (
-      modifier.kind === "bonus" &&
-      modifier.to === "ac" &&
-      !modifier.melee &&
-      !modifier.ranged
-    ) {
-      if (!seen.has(effect.sourceId)) bonus += modifier.amount.bonus?.base ?? 0;
+    const amount = flat(effect.modifier);
+    if (amount !== null) {
+      if (!seen.has(effect.sourceId)) bonus += amount;
       seen.add(effect.sourceId);
     }
   }
@@ -408,7 +431,8 @@ function freeCastActions(
     if (!access.content(spellId)) return [];
     const spell = lookup(access, SpellSchema, spellId);
     const { activation } = spell;
-    if (spell.level === 0 || !activation) return [];
+    const quick = (how: FreeCast) => typeof how === "object" && how.bonusAction;
+    if (!activation || (spell.level === 0 && !ways.some(quick))) return [];
     if (!doesSomething(activation.resolution)) return [];
     const isOwn = (how: FreeCast) => how === true || how === "shortRest";
     const own = ways.filter(isOwn);
@@ -418,7 +442,13 @@ function freeCastActions(
       ...new Set(ways.filter((how) => !isOwn(how))),
     ];
     return kinds.flatMap((how, index) => {
-      const id = typeof how === "object" ? how.resource : `free:${spellId}`;
+      if (spell.level === 0 && !quick(how)) return [];
+      const id =
+        typeof how === "object" && how.resource
+          ? how.resource
+          : `free:${spellId}`;
+      const unlimited =
+        how === "atWill" || (typeof how === "object" && !how.resource);
       const slot =
         typeof how === "object" && how.slotLevel
           ? Object.entries(how.slotLevel)
@@ -428,19 +458,31 @@ function freeCastActions(
       if (slot < spell.level) return [];
       const step = spell.upcast?.perSlotLevel;
       const leveled =
-        slot > spell.level && step
-          ? scaleActivation(activation, step, slot - spell.level)
-          : activation;
+        spell.level === 0 && spell.cantrip
+          ? scaleActivation(
+              activation,
+              spell.cantrip.perTier,
+              cantripTier(level),
+            )
+          : slot > spell.level && step
+            ? scaleActivation(activation, step, slot - spell.level)
+            : activation;
       const lasting =
         typeof how === "object" && how.minutes !== undefined
           ? unconcentrated(leveled, how.minutes)
           : leveled;
-      const cast =
+      const targeted =
         typeof how === "object" && how.self
           ? { ...lasting, targeting: { self: true as const } }
           : lasting;
+      const cast =
+        typeof how === "object" && how.whileIn
+          ? { ...targeted, whileIn: how.whileIn }
+          : targeted;
       const suffix =
-        index === 0 ? "" : `:${typeof how === "object" ? how.resource : how}`;
+        index === 0
+          ? ""
+          : `:${typeof how === "object" ? (how.resource ?? "free") : how}`;
       return [
         {
           action: {
@@ -449,8 +491,12 @@ function freeCastActions(
             activation: {
               ...cast,
               cost: [
-                ...activation.cost.filter((cost) => cost !== "slot"),
-                ...(how === "atWill"
+                ...activation.cost
+                  .filter((cost) => cost !== "slot")
+                  .map((cost) =>
+                    quick(how) && cost === "action" ? "bonusAction" : cost,
+                  ),
+                ...(unlimited
                   ? []
                   : [
                       typeof how === "object" && how.perLevel && slot > 1
@@ -528,7 +574,7 @@ function freeCastOf(
 ): FreeCast | undefined {
   if (how === undefined || how === true || typeof how === "string") return how;
   return "resource" in how && typeof how.resource === "string"
-    ? (how as FreeCast)
+    ? how
     : (how as Record<string, FreeCast>)[spell];
 }
 
@@ -1103,7 +1149,7 @@ function bestMentalAbility(abilities: AbilityScores): Ability {
 export function ownFirstTurn(actor: Actor, access: ContentAccess): boolean {
   const combat = (access as ContentAccess & { readonly state?: DndState }).state
     ?.combat;
-  return combat?.round === 1 && combat.order[combat.index] === actor.id;
+  return combat?.round === 1 && turnId(combat) === actor.id;
 }
 
 // Whether it's the actor's own turn and it has taken its action, as for Blade Flourish's Speed.
@@ -1111,7 +1157,7 @@ export function ownFirstTurn(actor: Actor, access: ContentAccess): boolean {
 function ownTurnActed(actor: Actor, access: ContentAccess): boolean {
   const combat = (access as ContentAccess & { readonly state?: DndState }).state
     ?.combat;
-  return combat?.order[combat.index] === actor.id && !actor.budget.action;
+  return turnId(combat) === actor.id && !actor.budget.action;
 }
 
 // The variants picked for a feature, or for the feature it follows; with none picked, as many as it gives at first.
@@ -1150,20 +1196,24 @@ export function withVariant(
           ...feature.resources,
           ...picked.flatMap((item) => item.resources),
         ],
-        spells: picked.reduce<Record<string, string[]>>(
-          (all, item) => {
-            for (const [from, ids] of Object.entries(item.spells ?? {})) {
-              all[from] = [...(all[from] ?? []), ...ids];
+        ...(picked.some((item) => item.spells)
+          ? {
+              spells: picked.reduce<Record<string, string[]>>(
+                (all, item) => {
+                  for (const [at, ids] of Object.entries(item.spells ?? {})) {
+                    all[at] = [...(all[at] ?? []), ...ids];
+                  }
+                  return all;
+                },
+                Object.fromEntries(
+                  Object.entries(feature.spells ?? {}).map(([at, ids]) => [
+                    at,
+                    [...ids],
+                  ]),
+                ),
+              ),
             }
-            return all;
-          },
-          Object.fromEntries(
-            Object.entries(feature.spells ?? {}).map(([from, ids]) => [
-              from,
-              [...ids],
-            ]),
-          ),
-        ),
+          : {}),
       }
     : feature;
 }
@@ -1645,12 +1695,52 @@ export function onList(
 }
 
 // A feature's activations with the effects other features ride on them, as Tactical Shift's move on Second Wind.
+// Improved Mystic Fighting Style: a spell of the levels and class list named, that takes an action, can also be cast
+// with the passive's costs, as part of the Bonus Action of Flurry of Blows.
+function castWithVariants(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+  access: ContentAccess,
+): readonly KnownAction[] {
+  const ways = passives.flatMap((passive) =>
+    passive.kind === "castWith" ? [passive] : [],
+  );
+  if (ways.length === 0) return actions;
+  const extra = actions.flatMap((action) => {
+    const [, spellId] = /^spell:([^:]+:[^:]+)$/.exec(action.id) ?? [];
+    if (!spellId || action.spellLevel === null) return [];
+    if (!action.activation.cost.includes("action")) return [];
+    const spell = lookup(access, SpellSchema, spellId);
+    return ways.flatMap((way) =>
+      way.levels.includes(action.spellLevel ?? -1) &&
+      spell.classes.includes(way.list)
+        ? [
+            {
+              ...action,
+              id: `${action.id}:with`,
+              name: `${action.name} (${way.label})`,
+              activation: {
+                ...action.activation,
+                cost: [
+                  ...action.activation.cost.filter((cost) => cost !== "action"),
+                  ...way.cost,
+                ],
+              },
+            },
+          ]
+        : [],
+    );
+  });
+  return extra.length === 0 ? actions : [...actions, ...extra];
+}
+
 function withRiders(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
   actor: Actor,
 ): KnownAction[] {
-  return actions.map((action) => {
+  return actions.map((given) => {
+    let action = given;
     const { resolution } = action.activation;
     const riders = passives.flatMap((passive) =>
       passive.kind === "activationRider" &&
@@ -1666,6 +1756,16 @@ function withRiders(
     );
     const extra = riders.flatMap(({ effects }) => effects);
     const damage = riders.flatMap(({ damage: more }) => more ?? []);
+    const own = riders.flatMap(({ self }) => self ?? []);
+    if (own.length > 0) {
+      action = {
+        ...action,
+        activation: {
+          ...action.activation,
+          alsoSelf: [...(action.activation.alsoSelf ?? []), ...own],
+        },
+      };
+    }
     // On a save, whether it succeeds or fails, as Focused Strike's with Stunning Strike.
     if (resolution.kind === "save" && (damage.length > 0 || extra.length > 0)) {
       return {
@@ -2115,6 +2215,21 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ]
       : [],
   );
+  // What studying a book gave for good, as the Book of Exalted Deeds' Halo, the book itself gone or not (gear.ts).
+  for (const itemId of actor.studied ?? []) {
+    const item = lookup(access, ItemSchema, itemId);
+    if (item.type === "magicItem")
+      itemPassives.push(...(item.study?.passives ?? []));
+  }
+  // A curse works while its bearer stays attuned to the item, worn or not, as Armor of Vulnerability's (gear.ts).
+  if (!antimagic) {
+    for (const itemId of attuned) {
+      const item = ItemSchema.safeParse(access.content(itemId)).data;
+      if (item && "curse" in item) {
+        itemPassives.push(...(item.curse?.passives ?? []));
+      }
+    }
+  }
   const abilities = withEffectScores(
     withItemAbilities(ownAbilities(actor, build), scoring, attuned),
     actor,
@@ -2374,7 +2489,34 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       skills.add(picked as Skill);
     }
   }
-  const traits = [...itemPassives, ...kept, ...fromFeatures.passives];
+  // A trait that holds only without Heavy armor, or without armor and a Shield, as Fast Movement or Unarmored Movement.
+  const heavy = worn.some(
+    ([, item]) => item.type === "armor" && item.armorType === "heavy",
+  );
+  const fits = (passive: Passive): boolean =>
+    (passive.kind !== "modifier" ||
+      !passive.while ||
+      passive.while.some((id) =>
+        actor.activeEffects.some(({ sourceId }) =>
+          sourceId.startsWith(`feature:${id}:`),
+        ),
+      )) &&
+    ((passive.kind !== "modifier" && passive.kind !== "weaponRider") ||
+      passive.armor === undefined ||
+      (passive.armor === "noHeavy" ? !heavy : !armored));
+  // Durable Magic's bonuses hold only while the bearer concentrates, and Power of the Wilds' Lion aura only in a Rage.
+  const traits = [...itemPassives, ...kept, ...fromFeatures.passives].filter(
+    (passive) =>
+      fits(passive) &&
+      (passive.kind !== "modifier" ||
+        !passive.concentrating ||
+        actor.concentratingOn !== null) &&
+      (passive.kind !== "aura" ||
+        !passive.while ||
+        actor.activeEffects.some(({ sourceId }) =>
+          passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+        )),
+  );
   const castingAbility = new Map([
     ...answerAbilities,
     ...fromFeatures.abilities,
@@ -2387,22 +2529,29 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ),
   ]);
   const armorBases: number[] = [];
+  const armorTypes: string[] = [];
   const flatBonus = magic.ac;
   let shield = 0;
+  let heldAc = 0; // a magic weapon's own bonus to AC, as the Wand of Orcus's +3 while held
+  let shielded = false;
   const actions: KnownAction[] = [];
+  // Use Magic Device: any Spell Scroll read with Intelligence.
+  const anyScroll = traits.find((trait) => trait.kind === "anyScroll");
+  const reader =
+    untrainedArmor || (!caster?.spellcasting && !anyScroll)
+      ? undefined
+      : {
+          classes: caster?.spellcasting ? Object.keys(classLevels) : [],
+          ability:
+            caster?.spellcasting?.ability ??
+            (anyScroll?.kind === "anyScroll" ? anyScroll.ability : "int"),
+          highest: slots.findLastIndex((count) => count > 0) + 1,
+          ...(anyScroll?.kind === "anyScroll"
+            ? { anyScroll: anyScroll.ability }
+            : {}),
+        };
   for (const [itemId, item] of worn) {
-    const usable = itemAction(
-      itemId,
-      item,
-      access,
-      untrainedArmor || !caster?.spellcasting
-        ? undefined
-        : {
-            classes: Object.keys(classLevels),
-            ability: caster.spellcasting.ability,
-            highest: slots.findLastIndex((count) => count > 0) + 1,
-          },
-    );
+    const usable = itemAction(itemId, item, access, reader);
     if (usable) {
       actions.push(
         item.type === "gear"
@@ -2440,7 +2589,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       armorBases.push(
         parsed.base + allowed + ownAc(item.bonuses, !works(itemId, item)),
       );
+      armorTypes.push(parsed.armorType);
     } else if (item.type === "shield") {
+      shielded = true;
       // Only one shield is held, and it protects only with training.
       if (trained.has("shield")) {
         shield = Math.max(
@@ -2450,6 +2601,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       }
     } else if (item.type === "weapon") {
       const weapon = WeaponSchema.parse(item);
+      heldAc = Math.max(heldAc, ownAc(weapon.bonuses, !works(itemId, item)));
       // A magic weapon's own bonus, or the best from a magic weapon carried beside it, never both.
       const own = (to: "attack" | "damage"): number =>
         Math.max(
@@ -2533,15 +2685,20 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   actions.push(
     ...fromFeatures.actions.map((action) => {
       const { targeting } = action.activation;
-      if (!("creatures" in targeting) || !targeting.creaturesBy) return action;
-      const mod = abilityModifier(abilities[targeting.creaturesBy]);
+      if (!("creatures" in targeting)) return action;
+      const { creaturesBy, creaturesPlus } = targeting;
+      if (!creaturesBy && !creaturesPlus) return action;
+      const by = creaturesBy ? abilityModifier(abilities[creaturesBy]) : 0;
+      const plus = creaturesPlus
+        ? Math.max(0, abilityModifier(abilities[creaturesPlus]))
+        : 0;
       return {
         ...action,
         activation: {
           ...action.activation,
           targeting: {
             ...targeting,
-            creatures: Math.max(targeting.creatures, mod),
+            creatures: Math.max(targeting.creatures, by) + plus,
           },
         },
       };
@@ -2719,8 +2876,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     maxHp,
     ac: bestAc(actor, abilities, {
       armorBases,
-      flatBonus: flatBonus + shield,
+      flatBonus: flatBonus + shield + heldAc,
       passives: traits,
+      armorTypes,
+      shielded,
+      proficiency: proficiencyBonus(level) + magic.proficiency,
     }),
     speed: encumberedSpeed(species.speed - 10 * (load ?? 0), carried, capacity),
     savingThrows: withFallbackSaves(
@@ -2749,13 +2909,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     slots,
     resources: {},
     passives: [
-      ...itemPassives,
+      ...itemPassives.filter(fits),
       ...kept,
-      ...fromFeatures.passives.map((passive) =>
-        passive.kind === "extraDamage"
-          ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
-          : passive,
-      ),
+      ...fromFeatures.passives
+        .filter(fits)
+        .map((passive) =>
+          passive.kind === "extraDamage"
+            ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
+            : passive,
+        ),
       ...(holdsConcentration(actor)
         ? [{ kind: "concentrationAdvantage" as const }]
         : []),
@@ -2784,7 +2946,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
                   withSpellTypes(
                     withCastsAs(
                       withExtraTargets(
-                        withRiders(actions, fromFeatures.passives, actor),
+                        withRiders(
+                          castWithVariants(
+                            actions,
+                            fromFeatures.passives,
+                            access,
+                          ),
+                          fromFeatures.passives,
+                          actor,
+                        ),
                         fromFeatures.passives,
                       ),
                       fromFeatures.passives,
@@ -2925,7 +3095,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
               0,
             )
           : 0) -
-        (tooHeavy && load === null ? 10 : 0) -
+        (tooHeavy &&
+        load === null &&
+        !traits.some((passive) => passive.kind === "armorStrength")
+          ? 10
+          : 0) -
         5 * actor.exhaustion,
     ),
     resources: Object.fromEntries(
@@ -2976,7 +3150,6 @@ function familiarFrom(
   return {};
 }
 
-// shortcut: a speed bonus doesn't check the armor it needs, such as Fast Movement's.
 function passiveBonus(
   stats: Stats,
   to: "speed" | "initiative" | "maxHp",
@@ -3034,6 +3207,7 @@ function itemAction(
         readonly classes: readonly string[];
         readonly ability: Ability;
         readonly highest: number;
+        readonly anyScroll?: Ability; // any scroll, by Use Magic Device
       }
     | undefined,
 ): KnownAction | null {
@@ -3088,9 +3262,10 @@ function itemAction(
     if (!spell.activation || !doesSomething(spell.activation.resolution)) {
       return null;
     }
-    const activation = reader
-      ? spell.activation
-      : withItemNumbers(spell.activation, 13, 5);
+    const activation =
+      reader && reader.classes.length > 0
+        ? spell.activation
+        : withItemNumbers(spell.activation, 13, 5);
     return {
       id: `item:${itemId}`,
       name: `${spell.name} (${item.name})`,
@@ -3108,10 +3283,11 @@ function itemAction(
   // slots they have takes a check of their spellcasting ability first, whose failure wastes the scroll.
   if (item.type !== "magicItem" || !item.spell || !reader) return null;
   const spell = lookup(access, SpellSchema, item.spell);
+  const listed = onClassList(spell, reader.classes);
   if (
     !spell.activation ||
     !doesSomething(spell.activation.resolution) ||
-    !onClassList(spell, reader.classes)
+    (!listed && reader.anyScroll === undefined)
   ) {
     return null;
   }
@@ -3128,11 +3304,19 @@ function itemAction(
       ),
     },
     spellLevel: spell.level,
-    ...(spell.level > Math.max(reader.highest, 0)
-      ? {
-          castCheck: { ability: reader.ability, dc: 10 + spell.level },
-        }
-      : {}),
+    ...(listed
+      ? spell.level > Math.max(reader.highest, 0)
+        ? { castCheck: { ability: reader.ability, dc: 10 + spell.level } }
+        : {}
+      : spell.level > 1
+        ? {
+            castCheck: {
+              ability: reader.anyScroll ?? reader.ability,
+              skill: "arcana" as const,
+              dc: 10 + spell.level,
+            },
+          }
+        : {}),
   };
 }
 
@@ -3481,7 +3665,7 @@ function statBlockStats(
       checks: 0,
     },
     speeds: Object.fromEntries(
-      (["fly", "climb", "burrow"] as const).flatMap((mode) => {
+      (["fly", "climb", "burrow", "swim"] as const).flatMap((mode) => {
         const feet = monster.speeds?.[mode];
         return feet ? [[mode, Math.max(0, feet - 5 * actor.exhaustion)]] : [];
       }),
@@ -3601,7 +3785,7 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       }
     : own;
   // A Ring of Free Action: nothing takes Speed off.
-  const speed = effectBonus(actor, "speed", hasSteadySpeed(stats));
+  const speed = effectBonus(actor, "speed", hasSteadySpeed(stats, actor));
   const maxHp = effectBonus(actor, "maxHp");
   const stuck = new Set(
     actor.activeEffects.flatMap(({ modifier }) =>
@@ -3616,7 +3800,7 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
           ...changed,
           actions: changed.actions.filter((action) => !stuck.has(action.id)),
         };
-  const moving = zoneMoves(actor);
+  const moving = [...zoneMoves(actor), ...jumpActions(actor, stats)];
   const moved =
     moving.length > 0
       ? { ...free, actions: [...free.actions, ...moving] }
@@ -3624,20 +3808,78 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
   const loss = actor.maxHpLoss ?? 0;
   // The environmental effects around it give their passives too, as Arcadian Vitality (environment.ts).
   const around = environmentPassives(moved.creatureType, access);
-  const placed =
+  const surrounded =
     around.length > 0
       ? { ...moved, passives: [...moved.passives, ...around] }
       : moved;
+  // A character's passive marked `bloodied` holds only while it is, as Boon of the Furious Storm's Immunity.
+  const placed =
+    actor.source.kind === "character" &&
+    surrounded.passives.some(
+      (passive) => "bloodied" in passive && passive.bloodied,
+    ) &&
+    actor.hp * 2 > surrounded.maxHp
+      ? {
+          ...surrounded,
+          passives: surrounded.passives.filter(
+            (passive) => !("bloodied" in passive && passive.bloodied),
+          ),
+        }
+      : surrounded;
+  // Boots of Striding and Springing: a Speed of at least 30 feet.
+  const floor = Math.max(
+    0,
+    ...passiveModifiers(placed.passives).flatMap((modifier) =>
+      modifier.kind === "speedFloor" ? [modifier.feet] : [],
+    ),
+  );
+  const floored =
+    floor > placed.speed + speed ? { ...placed, speed: floor - speed } : placed;
   return speed === 0 && maxHp === 0 && loss === 0
-    ? placed
+    ? floored
     : {
-        ...placed,
-        speed: Math.max(0, stats.speed + speed),
+        ...floored,
+        speed: Math.max(0, floored.speed + speed),
         maxHp: Math.max(1, stats.maxHp + maxHp - loss),
       };
 }
 
 export const MOVE_ZONE = "zone-move:";
+export const JUMP_BOOST = "jump-boost";
+
+// A jump farther than walking allows, once a turn, for a little movement, as the Jump spell's 30 feet for 10.
+function jumpActions(actor: Actor, stats: Stats): KnownAction[] {
+  const best = [
+    ...actor.activeEffects.map(({ modifier }) => modifier),
+    ...passiveModifiers(stats.passives),
+  ].reduce<Extract<Modifier, { kind: "jumpBoost" }> | null>(
+    (most, modifier) =>
+      modifier.kind === "jumpBoost" && modifier.feet > (most?.feet ?? 0)
+        ? modifier
+        : most,
+    null,
+  );
+  if (!best) return [];
+  return [
+    {
+      id: JUMP_BOOST,
+      name: `Jump (${String(best.feet)} ft for ${String(best.movement)} ft of movement)`,
+      activation: {
+        cost: [],
+        oncePerTurn: JUMP_BOOST,
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          damage: [],
+          effects: [
+            { kind: "teleport", feet: best.feet, movement: best.movement },
+          ],
+        },
+      },
+      spellLevel: null,
+    },
+  ];
+}
 
 // An action to move an area the bearer keeps, as Moonbeam's Magic action. shortcut: its reach is counted from the
 // bearer, not from where the area stands.
@@ -3653,7 +3895,13 @@ function zoneMoves(actor: Actor): KnownAction[] {
           id: `${MOVE_ZONE}${sourceId}`,
           name: `Move ${modifier.name ?? "the area"}`,
           activation: {
-            cost: ["action"],
+            cost:
+              modifier.area.moveWith === "free"
+                ? []
+                : [modifier.area.moveWith ?? "action"],
+            ...(modifier.area.moveWith === "free"
+              ? { oncePerTurn: `${MOVE_ZONE}${sourceId}` }
+              : {}),
             targeting: {
               area: { shape: "sphere", radius: modifier.radius },
               range: modifier.area.moves,
@@ -3685,7 +3933,9 @@ function withEffectActions(
       ({ modifier }) =>
         modifier.kind === "weaponSpell" ||
         modifier.kind === "grantedAction" ||
-        modifier.kind === "wished",
+        modifier.kind === "wished" ||
+        modifier.kind === "stolenSpell" ||
+        modifier.kind === "spheres",
     ) &&
     !stats.actions.some((action) =>
       weaponAttackOf(action.activation.resolution),
@@ -3697,6 +3947,52 @@ function withEffectActions(
   const resources: Record<string, number> = {};
   let actions = stats.actions;
   for (const { modifier, sourceId, level } of actor.activeEffects) {
+    // Elminster's Effulgent Spheres: each of its actions spends a sphere.
+    if (modifier.kind === "spheres") {
+      const spellId = spellOfSource(sourceId) ?? "";
+      const spell = lookup(access, SpellSchema, spellId);
+      if (!spell.spheres) continue;
+      const key = `spheres:${spellId}`;
+      resources[key] =
+        spell.spheres.count +
+        spell.spheres.perSlot *
+          Math.max(0, (level ?? spell.level) - spell.level);
+      spell.spheres.actions.forEach((activation, index) => {
+        granted.push({
+          id: `spheres:${sourceId}:${String(index)}`,
+          name: `${spell.name}${activation.label ? `: ${activation.label}` : ""}`,
+          activation: {
+            ...activation,
+            cost: [...activation.cost, { resource: key }],
+          },
+          spellLevel: null,
+        });
+      });
+      continue;
+    }
+    // Spell Thief: the thief has the spell prepared, cast with its own slots, and its caster can't cast it.
+    if (modifier.kind === "stolenSpell") {
+      const id = `spell:${modifier.spell}`;
+      if (modifier.lost) {
+        actions = actions.filter(
+          (action) => spellOfSource(action.id) !== modifier.spell,
+        );
+      } else if (!actions.some((action) => action.id === id)) {
+        const spell = lookup(access, SpellSchema, modifier.spell);
+        if (spell.activation) {
+          actions = [
+            ...actions,
+            {
+              id,
+              name: spell.name,
+              activation: spell.activation,
+              spellLevel: spell.level,
+              upcast: spell.upcast,
+            },
+          ];
+        }
+      }
+    }
     if (modifier.kind === "wished") {
       const id = `spell:${modifier.spell}`;
       const spell = lookup(access, SpellSchema, modifier.spell);
@@ -3960,8 +4256,14 @@ function effectBonus(
   return total;
 }
 
-export function hasSteadySpeed(stats: Stats): boolean {
-  return stats.passives.some((passive) => passive.kind === "steadySpeed");
+export function hasSteadySpeed(stats: Stats, actor?: Actor): boolean {
+  return (
+    stats.passives.some((passive) => passive.kind === "steadySpeed") ||
+    (actor?.activeEffects.some(
+      ({ modifier }) => modifier.kind === "steadySpeed",
+    ) ??
+      false)
+  );
 }
 
 export function modifierFor(stats: Stats, ability: Ability): number {
@@ -4219,6 +4521,7 @@ export function scaledDice(
     readonly dice?: string | undefined;
     readonly diceCount?: string | undefined;
     readonly dieSize?: string | undefined;
+    readonly dieAtLeast?: string | undefined;
     readonly halfDice?: true | undefined;
   },
   scaling: Readonly<Record<string, number>>,
@@ -4227,7 +4530,11 @@ export function scaledDice(
   const [count = "0", sides = "0"] = source.dice.split("d");
   const dice = Number(scaling[source.diceCount ?? ""] ?? count);
   const rolled = source.halfDice ? Math.ceil(dice / 2) : dice;
-  return `${String(rolled)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
+  const size = Math.max(
+    Number(scaling[source.dieSize ?? ""] ?? sides),
+    scaling[source.dieAtLeast ?? ""] ?? 0,
+  );
+  return `${String(rolled)}d${String(size)}`;
 }
 
 // A feature's dice that grow at levels in one class, as Jolt to Life's lightning at Artificer levels 11 and 17.
@@ -4308,16 +4615,28 @@ export function scaleActivation(
     return longer ? withDuration(activation, longer) : activation;
   }
   if ("addRadius" in step) {
-    const { targeting } = activation;
-    return "area" in targeting
+    const { targeting, trigger } = activation;
+    const more = step.addRadius * times;
+    if ("area" in targeting) {
+      return {
+        ...activation,
+        targeting: {
+          ...targeting,
+          area: { ...targeting.area, radius: targeting.area.radius + more },
+        },
+      };
+    }
+    // A reaction's reach grows, as Aura of the Guardian's 10 feet becoming 30.
+    return trigger?.within !== undefined && "range" in targeting
       ? {
           ...activation,
+          trigger: { ...trigger, within: trigger.within + more },
           targeting: {
             ...targeting,
-            area: {
-              ...targeting.area,
-              radius: targeting.area.radius + step.addRadius * times,
-            },
+            range:
+              typeof targeting.range === "number"
+                ? targeting.range + more
+                : targeting.range,
           },
         }
       : activation;
@@ -4365,6 +4684,10 @@ export function scaleActivation(
         return { ...effect, amount: more(effect.amount) };
       }
       if (effect.kind === "transference") {
+        return { ...effect, amount: more(effect.amount) };
+      }
+      // What a reaction takes off grows too, as Spirit Shield's d6s.
+      if (effect.kind === "reduceDamage" && effect.amount) {
         return { ...effect, amount: more(effect.amount) };
       }
       if (effect.kind === "hitDieHeal") {

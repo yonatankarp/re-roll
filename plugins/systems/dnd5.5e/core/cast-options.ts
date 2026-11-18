@@ -138,6 +138,12 @@ function changed(
       },
     };
   }
+  if (option.userEffects) {
+    next = {
+      ...next,
+      userEffects: [...(next.userEffects ?? []), ...option.userEffects],
+    };
+  }
   if (option.tempHp && next.resolution.kind === "automatic") {
     next = {
       ...next,

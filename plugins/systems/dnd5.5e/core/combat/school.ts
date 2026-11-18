@@ -1,11 +1,17 @@
-import type { Frame, SystemEvent } from "#sdk";
+import {
+  awaitDecision,
+  type Frame,
+  frameHandler,
+  type SystemEvent,
+} from "#sdk";
+import { z } from "zod";
 import {
   ClassSchema,
   type LeafEffect,
   type Passive,
   SpellSchema,
 } from "../schemas.ts";
-import { type Actor, dndEvent, isDown, NS } from "../state.ts";
+import { type Actor, dndEvent, frame, isDown, NS } from "../state.ts";
 import { finalDamage } from "../rules.ts";
 import { distanceFeet } from "../grid.ts";
 import {
@@ -18,11 +24,12 @@ import {
   modifierFor,
   rollAmount,
   spellModifier,
+  spellSaveDc,
   type Stats,
 } from "../stats.ts";
 import { HIT_DICE, spellOfSource } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
-import { dealEvents, leafEvents, typeAgainst } from "./effects.ts";
+import { dealEvents, leafEvents, rollSave, typeAgainst } from "./effects.ts";
 import { teleportFrame } from "./movement.ts";
 import { type Context, enemies } from "./queries.ts";
 
@@ -129,7 +136,7 @@ function riding(stats: Stats, school: string | null, rider: Rider): boolean {
 }
 
 // Up to this many of the actor's unspent Hit Point Dice, rolled and spent.
-function spendHitDice(
+export function spendHitDice(
   actor: Actor,
   count: number,
   context: Context,
@@ -332,7 +339,7 @@ export function castRiders(
         ? true
         : passive.school
           ? slotLevel !== undefined &&
-            cost.includes("action") &&
+            (cost.includes("action") || passive.slotted === true) &&
             passive.school.some((item) => item === school)
           : passive.mends
             ? heals(action) || cures(action)
@@ -434,8 +441,12 @@ export function castRiders(
             atSlotLevel(effects, slotLevel ?? 0),
             `castRider:${action.id}`,
             actor,
-            actor,
+            ride.toAlly
+              ? (hurtAlly(actor, ride.toAlly, context) ?? actor)
+              : actor,
             context,
+            undefined,
+            slotLevel,
           ),
           // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
           ...(onTargets
@@ -469,8 +480,9 @@ export function castRiders(
         ];
       }),
     ],
-    frames: rides.flatMap(({ effects }) =>
-      effects.flatMap((effect) =>
+    frames: rides.flatMap(({ effects, choices }) => [
+      ...(choices ? riderChoiceFrame(actor, choices, action, context) : []),
+      ...effects.flatMap((effect) =>
         effect.kind === "teleport"
           ? [
               teleportFrame(
@@ -483,15 +495,157 @@ export function castRiders(
             ]
           : [],
       ),
-    ),
+    ]),
   };
+}
+
+type Choice = NonNullable<
+  Extract<Passive, { kind: "castRider" }>["choices"]
+>[number];
+
+const NONE = "none";
+
+// Steps of the Fey: once the spell is done the caster picks one of its rider's choices, or none: effects on itself or
+// an ally near it, or a save for each foe near where it cast the spell.
+function riderChoiceFrame(
+  actor: Actor,
+  choices: readonly Choice[],
+  action: KnownAction,
+  context: Context,
+): Frame[] {
+  const options = choices.flatMap((choice, index) => {
+    if (choice.foes) {
+      return [{ id: String(index), label: choice.name }];
+    }
+    const near = Object.values(context.state.actors).filter(
+      (item) =>
+        item.side === actor.side &&
+        !isDown(item) &&
+        (item.id === actor.id ||
+          (choice.within !== undefined &&
+            distanceFeet(item.position, actor.position) <= choice.within)),
+    );
+    return near.map((item) => ({
+      id: `${String(index)}|${item.id}`,
+      label:
+        item.id === actor.id ? choice.name : `${choice.name}: ${item.name}`,
+    }));
+  });
+  if (options.length === 0) return [];
+  return [
+    awaitDecision({
+      id: `${NS}:riderChoice:${actor.id}:${action.id}`,
+      actor: actor.id,
+      prompt: `${action.name}: which of its extra effects?`,
+      options: [...options, { id: NONE, label: "None" }],
+      resume: frame("riderChoice", {
+        actor: actor.id,
+        sourceId: action.id,
+        choices,
+        ...(actor.position ? { from: actor.position } : {}),
+      }),
+    }),
+  ];
+}
+
+const RiderChoiceSchema = z.object({
+  actor: z.string(),
+  sourceId: z.string(),
+  choices: z.array(z.unknown()),
+  from: z.object({ x: z.number(), y: z.number() }).optional(),
+  answer: z.string(),
+});
+
+export const riderChoiceFrames = {
+  [`${NS}:riderChoice`]: frameHandler({
+    schema: RiderChoiceSchema,
+    run: (payload, context: Context) => {
+      const caster = context.state.actors[payload.actor];
+      if (!caster || payload.answer === NONE) return {};
+      const [index = "", targetId] = payload.answer.split("|");
+      const choice = payload.choices[Number(index)] as Choice | undefined;
+      if (!choice) throw new Error(`${payload.answer} isn't offered`);
+      if (!choice.foes) {
+        const target = context.state.actors[targetId ?? caster.id] ?? caster;
+        return {
+          events: leafEvents(
+            choice.effects,
+            payload.sourceId,
+            caster,
+            target,
+            context,
+          ),
+        };
+      }
+      const { save, effects } = choice.foes;
+      const dc = spellSaveDc(deriveStats(caster, context));
+      const from = payload.from ?? caster.position;
+      const events = Object.values(context.state.actors).flatMap((foe) => {
+        if (
+          foe.side === caster.side ||
+          isDown(foe) ||
+          distanceFeet(foe.position, from ?? null) > (choice.within ?? 5)
+        ) {
+          return [];
+        }
+        const rolled = save
+          ? rollSave(foe, save, dc, context, true)
+          : { saved: false, events: [] };
+        return [
+          ...rolled.events,
+          ...(rolled.saved
+            ? []
+            : leafEvents(effects, payload.sourceId, caster, foe, context)),
+        ];
+      });
+      return { events };
+    },
+  }),
+};
+
+// Undead Vitality: the most hurt of the caster's allies of these types near it, if one is hurt at all.
+function hurtAlly(
+  caster: Actor,
+  near: { readonly creatureTypes: readonly string[]; readonly within: number },
+  context: Context,
+): Actor | null {
+  const hurt = Object.values(context.state.actors)
+    .filter(
+      (item) =>
+        item.side === caster.side &&
+        item.hp > 0 &&
+        distanceFeet(item.position, caster.position) <= near.within &&
+        near.creatureTypes.includes(
+          (deriveStats(item, context).creatureType ?? "").toLowerCase(),
+        ),
+    )
+    .map((item) => ({
+      item,
+      missing: deriveStats(item, context).maxHp - item.hp,
+    }))
+    .sort((a, b) => b.missing - a.missing)[0];
+  return hurt && hurt.missing > 0 ? hurt.item : null;
 }
 
 // Persistent Conjuration: the bonus to the save to keep Concentration on a Conjuration spell.
 // shortcut: the spellcasting modifier, rather than the one the feat raised, which it usually is.
 export function concentrationBonus(actor: Actor, context: Context): number {
   const stats = deriveStats(actor, context);
-  return riding(stats, schoolOf(actor.concentratingOn, context), "persistent")
-    ? Math.max(0, spellModifier(stats))
-    : 0;
+  // Bladesong's Focus: a bonus only to these saves.
+  const focus = actor.activeEffects.reduce(
+    (sum, { modifier }) =>
+      modifier.kind === "bonus" &&
+      modifier.to === "saves" &&
+      modifier.concentration
+        ? sum +
+          evaluateFormula(modifier.amount.bonus ?? { base: 0, add: [] }, stats)
+        : sum,
+    0,
+  );
+  return (
+    focus +
+    (riding(stats, schoolOf(actor.concentratingOn, context), "persistent")
+      ? Math.max(0, spellModifier(stats))
+      : 0)
+  );
 }

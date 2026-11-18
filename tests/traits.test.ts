@@ -439,6 +439,7 @@ describe("species traits and feats", () => {
       );
     expect(kinds(hero)).toEqual([
       "dnd5.5e:resourceSpent:",
+      "dnd5.5e:oncePerTurnUsed:",
       "dnd5.5e:damaged:4",
     ]);
     const spent = { ...hero, resourcesSpent: { "last-stand": 1 } };

@@ -17,14 +17,12 @@ import type { Context } from "./queries.ts";
 // save is the same whichever is picked. Eyebite's later turns may aim at a creature that already saved against it.
 
 const optioned = (effects: readonly LeafEffect[]): LeafEffect[] =>
-  effects.filter(
-    (effect) =>
-      (effect.kind === "applyCondition" || effect.kind === "modifier") &&
-      effect.option !== undefined,
-  );
+  effects.filter((effect) => labelOf(effect) !== undefined);
 
 const labelOf = (effect: LeafEffect): string | undefined =>
-  effect.kind === "applyCondition" || effect.kind === "modifier"
+  effect.kind === "applyCondition" ||
+  effect.kind === "modifier" ||
+  effect.kind === "forcedMove"
     ? effect.option
     : undefined;
 
@@ -76,7 +74,9 @@ export const optionFrames = {
       const target = context.state.actors[payload.target];
       if (!caster || !target) return {};
       const picked = payload.effects.flatMap((effect): LeafEffect[] =>
-        (effect.kind === "applyCondition" || effect.kind === "modifier") &&
+        (effect.kind === "applyCondition" ||
+          effect.kind === "modifier" ||
+          effect.kind === "forcedMove") &&
         effect.option === payload.answer
           ? [{ ...effect, option: undefined }]
           : [],

@@ -44,6 +44,9 @@ export interface Zone {
   readonly layers?: readonly Resolution[] | undefined; // what crossing its wall does, in order
   readonly name?: string | undefined; // what made it, for the log and the board
   readonly level?: number | undefined; // the slot its spell was cast with
+  readonly dim?: number | undefined; // light: feet of Dim Light beyond its Bright
+  readonly ownerSees?: true | undefined; // darkness its owner sees through
+  readonly reveals?: true | undefined; // light: no benefit from the Invisible condition in its Bright Light
 }
 
 export const AURA = "aura:";
@@ -71,6 +74,21 @@ function castZones(state: DndState): readonly Zone[] {
     ? []
     : Object.values(state.actors).flatMap((actor) =>
         actor.activeEffects.flatMap(({ modifier, sourceId, level }): Zone[] => {
+          // Light the creature sheds, as Faerie Fire's outline.
+          if (modifier.kind === "sheds") {
+            if (!actor.position || isDead(actor)) return [];
+            return [
+              {
+                zone: modifier.light,
+                at: actor.position,
+                radius: modifier.feet,
+                dim: modifier.dim,
+                owner: actor.id,
+                sourceId,
+                follows: true,
+              },
+            ];
+          }
           if (modifier.kind !== "zone") return [];
           const at = modifier.follows ? actor.position : modifier.at;
           if (!at || (modifier.follows && isDead(actor))) return [];
@@ -89,6 +107,9 @@ function castZones(state: DndState): readonly Zone[] {
               layers: modifier.layers,
               name: modifier.name,
               level,
+              dim: modifier.dim,
+              ownerSees: modifier.ownerSees,
+              reveals: modifier.reveals,
             },
           ];
         }),
@@ -366,14 +387,23 @@ export const zoneImmune = (
       modifier.kind === "conditionImmunity" && modifier.condition === condition,
   );
 
-// The zone that hides a square, darkness before fog, or undefined.
+// The zone that hides a square, darkness before fog, or undefined. Darkness its caster sees through doesn't hide it
+// from `viewer`, when that's its caster, nor any of its own with `ownDarkness`.
 export function obscuring(
   square: Square | null,
   state: DndState,
+  viewer?: string,
+  ownDarkness = false,
 ): "darkness" | "fog" | undefined {
   const zones = zonesOf(state).filter(
     (zone) =>
-      (zone.zone === "darkness" || zone.zone === "fog") && inZone(zone, square),
+      (zone.zone === "darkness" || zone.zone === "fog") &&
+      inZone(zone, square) &&
+      !(
+        zone.zone === "darkness" &&
+        zone.owner === viewer &&
+        (zone.ownerSees ?? ownDarkness)
+      ),
   );
   return zones.find((zone) => zone.zone === "darkness")
     ? "darkness"
@@ -393,13 +423,33 @@ export const lit = (
       inZone(zone, square),
   );
 
+// Dim Light a zone sheds there: a dim zone, or the ring beyond a light's Bright Light.
 export const glows = (
   square: Square | null,
   state: DndState,
   access?: ContentAccess,
 ): boolean =>
   zonesOf(state, access).some(
-    (zone) => zone.zone === "dim" && inZone(zone, square),
+    (zone) =>
+      (zone.zone === "dim" && inZone(zone, square)) ||
+      ((zone.zone === "light" || zone.zone === "sunlight") &&
+        zone.dim !== undefined &&
+        square !== null &&
+        distanceFeet(zone.at, square) <= zone.radius + zone.dim),
+  );
+
+// In a zone that makes light a step dimmer, as round Shadow of Moil's caster.
+export const shaded = (square: Square | null, state: DndState): boolean =>
+  zonesOf(state).some((zone) => zone.zone === "shade" && inZone(zone, square));
+
+// In the Bright Light of a light that shows the Invisible, as a Lantern of Revealing's.
+export const revealed = (
+  square: Square | null,
+  state: DndState,
+  access?: ContentAccess,
+): boolean =>
+  zonesOf(state, access).some(
+    (zone) => zone.reveals === true && inZone(zone, square),
   );
 
 // Sunlight: a fight under the sky, outside the map's shade and darkness and any magical darkness, or a spell's

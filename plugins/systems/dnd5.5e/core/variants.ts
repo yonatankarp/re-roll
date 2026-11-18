@@ -82,6 +82,12 @@ function version(
     ...(parent.lastCharge ? { lastCharge: parent.lastCharge } : {}),
     ...(activations.length > 0 ? { activations } : {}),
     ...(parent.granted ? { granted: parent.granted } : {}),
+    ...("curse" in variant && variant.curse
+      ? { curse: variant.curse }
+      : parent.curse
+        ? { curse: parent.curse }
+        : {}),
+    ...(parent.attuneBy ? { attuneBy: parent.attuneBy } : {}),
   };
   const bonus = variant.bonuses?.[0]?.amount;
   const plus = bonus !== undefined && /, \+1\b/.test(parent.name);
@@ -125,9 +131,12 @@ function version(
     delete item.variants;
     return item;
   }
-  // A staff is wielded as a Quarterstaff, as a Staff of Striking is.
+  // A staff is wielded as a Quarterstaff, as a Staff of Striking is, and a wand as the weapon it names, as the Wand of
+  // Orcus as a Mace.
   const types =
-    parent.category === "weapon" || parent.category === "staff"
+    parent.category === "weapon" ||
+    parent.category === "staff" ||
+    parent.category === "wand"
       ? ["weapon"]
       : parent.category === "armor"
         ? ["armor", "shield"]

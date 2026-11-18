@@ -81,7 +81,8 @@ import {
 } from "./effects.ts";
 import { grapplesOn, releasedGrapples } from "./grapple.ts";
 import { distanceFeet } from "../grid.ts";
-import { coverFor } from "../sight.ts";
+import { coverFor, lightAt } from "../sight.ts";
+import { reviveUnderwater, suffocationEvents } from "./water.ts";
 import { hasTactic, revealEvents, STEALTH_ATTACK } from "../tactics.ts";
 import { regurgitationEvents, releasedSwallows } from "./swallow.ts";
 import {
@@ -418,6 +419,32 @@ function outOfCover(actor: Actor, context: Context): SystemEvent[] {
   return exposed ? revealEvents(actor) : [];
 }
 
+// Effects that end as the bearer's turn ends in Bright Light, as Cloak of Shadows', and those of anyone who has become
+// Incapacitated, as Draconic Flight's wings. shortcut: the second is checked as each turn ends, not the moment it comes.
+function lightAndWakeEnds(
+  actor: Actor | undefined,
+  context: Context,
+): SystemEvent[] {
+  const { state } = context;
+  return Object.values(state.actors).flatMap((bearer) =>
+    bearer.activeEffects.flatMap(
+      ({ endsInLight, untilIncapacitated, sourceId, casterId }) =>
+        (endsInLight &&
+          bearer.id === actor?.id &&
+          lightAt(bearer.position, state, context) === "bright") ||
+        (untilIncapacitated && hasCondition(bearer, ...INCAPACITATING))
+          ? [
+              dndEvent(`${NS}:effectEnded`, {
+                actor: bearer.id,
+                sourceId,
+                casterId,
+              }),
+            ]
+          : [],
+    ),
+  );
+}
+
 // A target repeats its save at the end of each of its turns, ending that spell's effects on itself on a success.
 export function runFinishTurn(context: Context): SystemResult {
   const { state } = context;
@@ -433,7 +460,11 @@ export function runFinishTurn(context: Context): SystemResult {
       : [],
   );
   const seen = new Set<string>();
-  const events: SystemEvent[] = actor ? outOfCover(actor, context) : [];
+  const events: SystemEvent[] = [
+    ...(actor ? outOfCover(actor, context) : []),
+    ...lightAndWakeEnds(actor, context),
+    ...suffocationEvents(actor, context),
+  ];
   for (const { actor: target, effect, save } of repeated) {
     const { sourceId, casterId, modifier } = effect;
     // Each caster's effect is saved against on its own, as two snakes' grapples are two grapples.
@@ -609,7 +640,15 @@ export function runFinishTurn(context: Context): SystemResult {
   const stopped = actor ? after.actors[actor.id] : undefined;
   const again = stopped && !isDown(stopped) ? extraTurnEvents(stopped) : null;
   if (again) return { events: [...ending, ...again] };
-  const between = betweenTurns(state, ending, context);
+  // A reaction to a creature ending its turn nearby, as with Skirmisher.
+  const watched =
+    actor && stopped && !isDown(stopped)
+      ? reactFrames(
+          { kind: "turnEnd", actor: actor.id },
+          { ...context, state: after },
+        )
+      : [];
+  const between = [...watched, ...betweenTurns(state, ending, context)];
   return between.length > 0
     ? { events: ending, frames: [...between, frame("advanceTurn", {})] }
     : runAdvanceTurn(context, ending);
@@ -654,6 +693,7 @@ export function runAdvanceTurn(
   const events = [
     ...finished,
     ...expired,
+    ...(next ? reviveUnderwater(next, { ...context, state: after }) : []),
     ...(next ? rescueEvents(next, { ...context, state: after }) : []),
     // Rage beyond Death: conscious at 0 Hit Points, still dying.
     ...(next && next.hp <= 0 && fightingOn(next)?.delayDeath && !isStable(next)
@@ -662,6 +702,7 @@ export function runAdvanceTurn(
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
     ...(next ? dodgeSaveEvents(next, { ...context, state: after }) : []),
     ...(next ? turnSaveEvents(next, { ...context, state: after }) : []),
+    ...(next ? shakeOffEvents(next, { ...context, state: after }, true) : []),
     ...(next ? reverseGravityEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
@@ -859,11 +900,41 @@ function banishEvents(caster: Actor, context: Context): SystemEvent[] {
 
 // shortcut: Regeneration isn't stopped by the damage types that should stop it, as no damage type taken is kept yet.
 // Self-Restoration: at the end of its turn the bearer ends the worst of these conditions on itself.
-function shakeOffEvents(actor: Actor, context: Context): SystemEvent[] {
+function shakeOffEvents(
+  actor: Actor,
+  context: Context,
+  start = false,
+): SystemEvent[] {
   if (isDown(actor)) return [];
-  return deriveStats(actor, context).passives.flatMap((passive) => {
-    const condition =
-      passive.kind === "shakeOff" ? cureFor(actor, passive.conditions) : null;
+  const stats = deriveStats(actor, context);
+  return stats.passives.flatMap((passive) => {
+    if (passive.kind !== "shakeOff" || (passive.turnStart === true) !== start) {
+      return [];
+    }
+    // Guarded Mind: every one of them ends, for a use of the resource.
+    if (start) {
+      const held = passive.conditions.filter((item) =>
+        hasCondition(actor, item),
+      );
+      const { resource } = passive;
+      if (
+        held.length === 0 ||
+        (resource !== undefined &&
+          (actor.resourcesSpent[resource] ?? 0) >=
+            (stats.resources[resource] ?? 0))
+      ) {
+        return [];
+      }
+      return [
+        ...(resource
+          ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
+          : []),
+        ...held.map((condition) =>
+          dndEvent(`${NS}:conditionRemoved`, { actor: actor.id, condition }),
+        ),
+      ];
+    }
+    const condition = cureFor(actor, passive.conditions);
     return condition
       ? [dndEvent(`${NS}:conditionRemoved`, { actor: actor.id, condition })]
       : [];

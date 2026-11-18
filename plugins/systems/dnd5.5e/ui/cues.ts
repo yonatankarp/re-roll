@@ -1,6 +1,6 @@
 import type { ContentAccess, SystemEvent } from "#sdk";
 import { resistancesLeft } from "../core/legendary.ts";
-import { EVENT_SCHEMAS } from "../core/state.ts";
+import { EVENT_SCHEMAS, turnId } from "../core/state.ts";
 import { unseenFoe } from "../core/fog.ts";
 import { parseState } from "./parse-state.ts";
 import { deriveStats, evaluateFormula, scaledDice } from "../core/stats.ts";
@@ -197,7 +197,7 @@ function cueOf(
       return { kind: "end" };
     case "dnd5.5e:turnAdvanced": {
       const { combat } = parseState(after);
-      const actor = combat?.order[combat.index];
+      const actor = turnId(combat);
       return actor ? { kind: "turn", actor } : null;
     }
     case "dnd5.5e:rollReported": {

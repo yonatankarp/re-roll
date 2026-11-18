@@ -10,7 +10,7 @@ import {
   reachableSquares,
   squareKey,
 } from "./grid.ts";
-import { darkvisionOf, difficultSquares, seeing } from "./sight.ts";
+import { difficultSquares, seeing, seesInvisible, sensesOf } from "./sight.ts";
 import { deriveStats } from "./stats.ts";
 import {
   type Actor,
@@ -18,6 +18,7 @@ import {
   NS,
   applyDndEvent,
   dndEvent,
+  hasCondition,
   isDown,
 } from "./state.ts";
 import { hasTactic } from "./tactics.ts";
@@ -123,15 +124,6 @@ function sightFrom(state: DndState, from: Square): ReadonlySet<string> {
   return seen;
 }
 
-const darkvisions = new WeakMap<Actor, number>();
-function darkvisionFor(actor: Actor, access: ContentAccess): number {
-  const known = darkvisions.get(actor);
-  if (known !== undefined) return known;
-  const feet = darkvisionOf(actor, access);
-  darkvisions.set(actor, feet);
-  return feet;
-}
-
 // Whether every square in line of sight is plainly seen: no zone, and nothing marked dim or dark.
 function allLit(state: DndState): boolean {
   const terrain = state.combat?.terrain;
@@ -159,10 +151,10 @@ function seenFrom(
   const sight = sightFrom(state, at);
   if (allLit(state)) return [...sight];
   const standing = { ...viewer, position: at };
-  const feet = darkvisionFor(viewer, access);
+  const senses = sensesOf(viewer, access);
   return [...sight].filter((key) => {
     const square = parseSquare(key);
-    return seeing(standing, square, state, access, feet) !== "none";
+    return seeing(standing, square, state, access, senses) !== "none";
   });
 }
 
@@ -202,8 +194,7 @@ export function partySight(state: DndState, access: ContentAccess): PartySight {
           "total" ||
           coverBetween(at, viewer.position, walls, NO_COVER, NOBODY) !==
             "total") &&
-        seeing(viewer, at, state, access, darkvisionFor(viewer, access)) !==
-          "none",
+        seeing(viewer, at, state, access) !== "none",
     );
   // Tremorsense finds a foe on the ground in range, through walls and darkness, hidden or not.
   // shortcut: the ground is taken to be stone, and anything with a Fly Speed to be off it.
@@ -212,10 +203,18 @@ export function partySight(state: DndState, access: ContentAccess): PartySight {
     const feet = tremorsenseOf(viewer, stats);
     return feet > 0 && viewer.position ? [{ at: viewer.position, feet }] : [];
   });
+  // X-ray vision sees a foe through walls in range, though not one that's Invisible.
+  const xrays = viewers.flatMap((viewer) => {
+    const feet = sensesOf(viewer, access).xray;
+    return feet > 0 && viewer.position ? [{ at: viewer.position, feet }] : [];
+  });
   const felt = (actor: Actor): boolean =>
-    feels.length > 0 &&
-    !speedsOf(actor, deriveStats(actor, access)).has("fly") &&
-    feels.some(({ at, feet }) => distanceFeet(at, actor.position) <= feet);
+    (feels.length > 0 &&
+      !speedsOf(actor, deriveStats(actor, access)).has("fly") &&
+      feels.some(({ at, feet }) => distanceFeet(at, actor.position) <= feet)) ||
+    (xrays.length > 0 &&
+      !hasCondition(actor, "invisible") &&
+      xrays.some(({ at, feet }) => distanceFeet(at, actor.position) <= feet));
   const foes = new Set<string>();
   for (const actor of Object.values(state.actors)) {
     // A foe that has hidden isn't seen, even where its square is.
@@ -225,7 +224,13 @@ export function partySight(state: DndState, access: ContentAccess): PartySight {
       squares.add(squareKey(actor.position));
       continue;
     }
-    if (hasTactic(actor, "hidden")) continue;
+    // Blindsight or Truesight in range finds one that hid, since hiding is the Invisible condition.
+    if (
+      hasTactic(actor, "hidden") &&
+      !viewers.some((viewer) => seesInvisible(viewer, actor, access))
+    ) {
+      continue;
+    }
     const key = squareKey(actor.position);
     if (squares.has(key) || inView(actor.position)) {
       foes.add(actor.id);

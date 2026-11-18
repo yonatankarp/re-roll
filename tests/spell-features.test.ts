@@ -18,7 +18,10 @@ import {
 } from "../plugins/systems/dnd5.5e/core/class-options.ts";
 import { recovered } from "../plugins/systems/dnd5.5e/core/rest.ts";
 import { classOptionFrames } from "../plugins/systems/dnd5.5e/core/class-options.ts";
-import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import {
+  dealEvents,
+  leafEvents,
+} from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { castRiders } from "../plugins/systems/dnd5.5e/core/combat/school.ts";
 import {
   freeOption,
@@ -440,6 +443,23 @@ const FIXTURES = [
         kind: "castRider",
         cantrip: true,
         hitDice: { count: 1, within: 30, parity: true },
+      },
+    ],
+  },
+  {
+    id: "test:feature/burning",
+    name: "Burning",
+    text,
+    automation: "full",
+    passives: [
+      {
+        kind: "modifier",
+        modifier: {
+          kind: "damageReduction",
+          amount: { bonus: { base: 0 } },
+          hitDice: { base: 1 },
+          oncePerTurn: true,
+        },
       },
     ],
   },
@@ -1469,5 +1489,42 @@ describe("Hit Point Dice surges, empowered healing and stopped spells", () => {
       "oncePerTurnUsed",
       "healed",
     ]);
+  });
+});
+
+describe("Hit Point Dice burned against a hit", () => {
+  it("spends one and takes its roll off the damage, once a turn", () => {
+    const actor = {
+      ...priest([[{ kind: "features", values: ["test:feature/burning"] }], []]),
+      hp: 20,
+    };
+    const context = {
+      ...run,
+      state: {
+        actors: { [PLAYER_ACTOR]: actor },
+        combat: {
+          encounter: "arena",
+          order: [PLAYER_ACTOR],
+          index: 0,
+          round: 1,
+        },
+      },
+      dice: { below: () => 0, roll: () => 4 },
+    };
+    const { events } = dealEvents(
+      actor,
+      [{ amount: 10, type: "fire" }],
+      false,
+      context,
+    );
+    expect(events.map((item) => item.kind.replace(`${NS}:`, ""))).toContain(
+      "resourceSpent",
+    );
+    const taken = events.flatMap((item) =>
+      item.kind === `${NS}:damaged` && "payload" in item
+        ? [(item.payload as { amount: number }).amount]
+        : [],
+    );
+    expect(taken[0]).toBeLessThan(10);
   });
 });

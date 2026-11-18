@@ -14,18 +14,24 @@ import {
   encodeOption,
   GRANTED_PREFIX,
   ITEM_PREFIX,
+  USE_PREFIX,
   MOVE,
   parseOption,
   PASS,
   PICK_UP,
+  SUMMON_WEAPON,
   STAY,
 } from "./ids.ts";
 import { teleportFrame } from "./movement.ts";
 import {
   type Actor,
+  ATTACK_ACTION,
   CAST_ACTION,
   CAST_LEVELED,
   QUICKENED,
+  LEVELED_CAST,
+  MAGIC_ACTION,
+  SLOT_CAST_ACTION,
   dndEvent,
   fightingOn,
   hasCondition,
@@ -54,7 +60,7 @@ import {
   PICK,
   pickOptions,
 } from "../targeting.ts";
-import { lightAttackEvents, revealEvents } from "../tactics.ts";
+import { castRevealEvents, lightAttackEvents } from "../tactics.ts";
 import {
   actorOf,
   aimsFor,
@@ -63,7 +69,9 @@ import {
   type Context,
   findAction,
   hasPassive,
+  attackedKey,
   inReach,
+  usedKey,
   moveSquares,
   reaches,
   slotLevelFor,
@@ -140,6 +148,18 @@ export function runTakeAction(
   if (payload.answer === FLEE) return runFlee(actor, context);
 
   const [actionId = "", targetId = "", slot] = parseOption(payload.answer);
+  // War Bond: the weapon comes back to its hand for the Bonus Action.
+  if (actionId === SUMMON_WEAPON) {
+    return {
+      events: [
+        dndEvent(`${NS}:budgetSpent`, { actor: actor.id, kind: "bonusAction" }),
+        dndEvent(`${NS}:itemPickedUp`, {
+          actor: actor.id,
+          index: Number(targetId),
+        }),
+      ],
+    };
+  }
   if (actionId === PICK_UP) {
     return {
       events: [
@@ -362,21 +382,33 @@ export function castAction(
   const passedSaves = pained?.events ?? [];
   const picked = typeof target === "string" ? null : target;
   const targetId = typeof target === "string" ? target : ALL;
-  const { projectiles, resolution } = action.activation;
+  const { projectiles, resolution, distinct } = action.activation;
+  // Each at a different creature: one apiece, the most hurt first, when they aren't picked.
+  const apart =
+    distinct && !picked
+      ? [...inReach(action, actor, state, context)]
+          .sort((a, b) => a.hp - b.hp)
+          .slice(0, projectiles ?? 1)
+      : null;
   const caught = picked
     ? picked.map((id) => actorOf(state, id))
-    : resolveTargets(targetId, action, actor, context);
+    : (apart ?? resolveTargets(targetId, action, actor, context));
   const riders = castRiders(actor, action, slotLevel, context, caught);
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
       ? {
-          frames: Array.from({ length: projectiles }, (_, index) =>
-            frame(resolution.kind === "attack" ? "attackRoll" : "projectile", {
-              attacker: actor.id,
-              actionId,
-              target: picked?.[index] ?? targetId,
-              ...(slotLevel === undefined ? {} : { slotLevel }),
-            }),
+          frames: Array.from(
+            { length: apart?.length ?? projectiles },
+            (_, index) =>
+              frame(
+                resolution.kind === "attack" ? "attackRoll" : "projectile",
+                {
+                  attacker: actor.id,
+                  actionId,
+                  target: picked?.[index] ?? apart?.[index]?.id ?? targetId,
+                  ...(slotLevel === undefined ? {} : { slotLevel }),
+                },
+              ),
           ),
         }
       : resolveAction(
@@ -422,6 +454,17 @@ export function castAction(
             }),
           ]
         : []),
+      ...actionKindMarks(actor, action, slotLevel, context, caught),
+      // What it does to its bearer whatever its targets, as Step of the Wind's Dash while carrying an ally.
+      ...(action.activation.alsoSelf
+        ? leafEvents(
+            action.activation.alsoSelf,
+            action.id,
+            actor,
+            actor,
+            context,
+          )
+        : []),
       ...passedSaves,
       ...(foiled?.events ?? []),
       ...lightAttackEvents(actor, actionId, context),
@@ -429,7 +472,11 @@ export function castAction(
       ...(resolution.kind === "attack" ||
       castsSilently(actor, action, deriveStats(actor, context), context)
         ? []
-        : revealEvents(actor)),
+        : castRevealEvents(
+            actor,
+            action.spellLevel !== null,
+            deriveStats(actor, context).passives,
+          )),
       ...(result.events ?? []),
       ...dealtSelfEffects(action, actor, result.events ?? [], context),
       ...dismissed(action, actor),
@@ -482,6 +529,70 @@ export function castAction(
 
 // What a cast's `selfEffects` give the caster once it has hurt another creature, as Improved Blessed Strikes' gift.
 // shortcut: an attack roll left waiting on a reaction lands later and gives nothing.
+// What Sudden Strike, Blink Steps, Spell Subterfuge or Tempestuous Magic wait on, marked only for a creature with
+// such an activation, so the turns of everyone else are kept as before.
+function actionKindMarks(
+  actor: Actor,
+  action: KnownAction,
+  slotLevel: number | undefined,
+  context: Context,
+  caught: readonly Actor[],
+): SystemEvent[] {
+  const known = deriveStats(actor, context).actions;
+  const waits = known.filter(
+    (item) =>
+      typeof item.activation.afterAction === "string" ||
+      typeof item.activation.afterCast === "string",
+  );
+  // Distant Strike: the creatures it has attacked this turn.
+  const attacked =
+    action.activation.resolution.kind === "attack" &&
+    known.some((item) => item.activation.afterTargets !== undefined)
+      ? caught.flatMap((target) =>
+          target.side === actor.side ? [] : [attackedKey(target.id)],
+        )
+      : [];
+  // Hand of Healing's heal after its Flurry of Blows strike.
+  const labelled = /^feature:([^:]+:[^:]+):\d+$/.exec(action.id)?.[1];
+  const usedMarks = deriveStats(actor, context).actions.flatMap((item) => {
+    const after = item.activation.afterUse;
+    return after &&
+      labelled === after.feature &&
+      (after.label === undefined || after.label === action.activation.label)
+      ? [usedKey(after.feature, after.label)]
+      : [];
+  });
+  if (waits.length === 0 && usedMarks.length === 0 && attacked.length === 0) {
+    return [];
+  }
+  const { cost, resolution } = action.activation;
+  const withAction = cost.includes("action");
+  const keys = [
+    ...(withAction &&
+    action.spellLevel === null &&
+    resolution.kind === "attack" &&
+    resolution.attack.type === "weapon"
+      ? [ATTACK_ACTION]
+      : []),
+    ...(withAction &&
+    (action.spellLevel !== null ||
+      action.id.startsWith(ITEM_PREFIX) ||
+      action.id.startsWith(USE_PREFIX))
+      ? [MAGIC_ACTION]
+      : []),
+    ...(withAction && action.spellLevel !== null && slotLevel !== undefined
+      ? [SLOT_CAST_ACTION]
+      : []),
+    ...((action.spellLevel ?? 0) >= 1 ? [LEVELED_CAST] : []),
+  ];
+  return [
+    ...(waits.length > 0 ? keys : []),
+    ...new Set([...usedMarks, ...attacked]),
+  ]
+    .filter((key) => !actor.usedThisTurn.includes(key))
+    .map((key) => dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }));
+}
+
 // How far a teleport that lands beside a creature may go: anywhere it sees.
 const TELEPORT_ANYWHERE = 1000;
 
@@ -517,6 +628,12 @@ function withShape(action: KnownAction, shape: string): KnownAction {
   const chosen = action.activation.shapes?.find(({ name }) => name === shape);
   if (!chosen) throw new Error(`${action.name} has no shape ${shape}`);
   const { resolution } = action.activation;
+  if (chosen.resolution) {
+    return {
+      ...action,
+      activation: { ...action.activation, resolution: chosen.resolution },
+    };
+  }
   if (!chosen.effects || resolution.kind !== "automatic") return action;
   return {
     ...action,
@@ -565,7 +682,8 @@ function pickFrame(
     action,
     slotLevelFor(actor, actionId, slot, context),
   );
-  const repeats = action.activation.projectiles !== undefined;
+  const repeats =
+    action.activation.projectiles !== undefined && !action.activation.distinct;
   return awaitDecision({
     id: encodeOption(
       `${NS}:targets:${actor.id}:${String(state.combat?.round ?? 0)}`,

@@ -27,6 +27,7 @@ import {
 import { finalDamage } from "../rules.ts";
 import { distanceFeet, type Square, squareKey } from "../grid.ts";
 import { lightAt } from "../sight.ts";
+import { timeStopEnds } from "./durations.ts";
 import {
   affects,
   statsOf,
@@ -311,7 +312,8 @@ export function runWallLayer(
   if (!action) return {};
   const result = resolveAction(action, owner, [target], context, zone.level);
   return {
-    events: result.events ?? [],
+    // Time Stop ends once what its caster made during it reaches another creature.
+    events: [...timeStopEnds(owner, [target]), ...(result.events ?? [])],
     frames: [...(result.frames ?? []), CHECK_END],
   };
 }
@@ -456,7 +458,11 @@ export function runZoneTick(
       : []),
   ];
   const result = resolveAction(action, owner, acting, context, zone.level);
-  const events = [...marks, ...(result.events ?? [])];
+  const events = [
+    ...timeStopEnds(owner, acting),
+    ...marks,
+    ...(result.events ?? []),
+  ];
   const { maxDamage } = zone.area ?? {};
   if (maxDamage !== undefined) {
     const dealt = events.reduce(

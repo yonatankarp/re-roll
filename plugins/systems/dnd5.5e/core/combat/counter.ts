@@ -81,6 +81,7 @@ function counterOf(
   level: number,
   alone: boolean,
   context: Context,
+  teleport = false, // a teleport that isn't a spell, which only Magic-User's Nemesis foils
 ): KnownAction | null {
   if (!foe.budget.reaction || isDown(foe)) return null;
   if (hasCondition(foe, ...INCAPACITATING)) return null;
@@ -94,6 +95,7 @@ function counterOf(
       const limits = outright(action);
       return (
         trigger?.spellCast === true &&
+        (!teleport || trigger.teleports === true) &&
         "range" in targeting &&
         distanceFeet(foe.position, caster.position) <=
           rangeFeet(targeting.range) &&
@@ -123,7 +125,12 @@ export function counterWindow(
   slotLevel: number | undefined,
   context: Context,
 ): Frame | null {
-  if (!isSpell(action, caster, context)) return null;
+  const { resolution } = action.activation;
+  const teleport =
+    !isSpell(action, caster, context) &&
+    resolution.kind === "automatic" &&
+    resolution.effects.some((effect) => effect.kind === "teleport");
+  if (!isSpell(action, caster, context) && !teleport) return null;
   // A spell cast with no components isn't seen being cast.
   if (castsSilently(caster, action, deriveStats(caster, context), context)) {
     return null;
@@ -136,7 +143,7 @@ export function counterWindow(
   for (const foe of enemies(context.state, caster)) {
     const aimed = typeof cast.target === "string" ? [cast.target] : cast.target;
     const alone = aimed.length > 0 && aimed.every((id) => id === foe.id);
-    const counter = counterOf(foe, caster, level, alone, context);
+    const counter = counterOf(foe, caster, level, alone, context, teleport);
     if (!counter) continue;
     const options = [
       { id: counter.id, label: `${counter.name} (${caster.name})` },
@@ -215,7 +222,9 @@ export function runCounterspell(
     resolution.kind === "save"
       ? evaluateFormula(resolution.dc, deriveStats(counterer, context))
       : 0;
-  const save = rollSave(caster, "con", dc, context, true);
+  // Counterspell's Constitution, or the counter's own, as Magic-User's Nemesis's Wisdom.
+  const ability = resolution.kind === "save" ? resolution.ability : "con";
+  const save = rollSave(caster, ability, dc, context, true);
   const own = deriveStats(counterer, context);
   const slot = slotToSpend(counter, counterer, own);
   const paid = payCosts(counter, counterer, context);
