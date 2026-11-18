@@ -89,6 +89,31 @@ describe("drafting world entities", () => {
   });
 });
 
+describe("drafting into a world plugin", () => {
+  it("gives lore the world plugin's id, and keeps rulings and a system's kinds in the book's", () => {
+    const { drafts } = draftWorld(
+      "bk",
+      "A Book",
+      [
+        verdict(2, "Gloomfen", "missing", "place"),
+        verdict(3, "1: Gate", "missing", "area"),
+        verdict(2, "Brindle", "linked", "place", "bk-world:place/brindle"),
+        verdict(2, "Can I Hide?", "missing", "ruling"),
+        verdict(2, "Dizzy", "missing", "condition"),
+      ],
+      new Set(),
+      { condition: "conditions" },
+      "bk-world",
+    );
+    expect(drafts.map(({ entry }) => [entry.id, entry.place])).toEqual([
+      ["bk-world:place/gloomfen", undefined],
+      ["bk-world:area/gloomfen-1-gate", "bk-world:place/gloomfen"],
+      ["bk:ruling/can-i-hide", undefined],
+      ["bk:condition/dizzy", undefined],
+    ]);
+  });
+});
+
 describe("drafting a system's text kinds", () => {
   it("leaves a heading's label, such as its kind or price, out of the id and name", () => {
     const { drafts } = draftWorld(
