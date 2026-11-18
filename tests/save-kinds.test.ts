@@ -1,5 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import type { z } from "zod";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import { GameEventSchema } from "../engine/kernel/events.ts";
 import { AWAIT_FRAME, REPLAY_FRAME } from "../engine/kernel/system.ts";
@@ -10,23 +11,47 @@ import { dnd55e } from "../plugins/systems/dnd5.5e/core/index.ts";
 // tests/fixtures/kinds.json locks every kind there is. A new kind is added to "kinds" by hand;
 // a locked kind the code no longer has fails here. "notInGoldens" lists the kinds no golden save
 // (tests/fixtures/saves) holds yet; a golden that reaches one fails here until it leaves the list.
+// "fields" locks each event's payload fields, "?" marking an optional one: a save holds old payloads,
+// so a field is never removed or made required, and a new one is optional.
 interface KindsFile {
   readonly kinds: readonly string[];
   readonly notInGoldens: readonly string[];
+  readonly fields: Readonly<Record<string, readonly string[]>>;
 }
 const file = JSON.parse(
   await readFile("tests/fixtures/kinds.json", "utf8"),
 ) as KindsFile;
 
-const literalKinds = (union: { options: unknown[] }): string[] =>
-  union.options.map(
-    (option) =>
-      (option as { shape: { kind: { value: string } } }).shape.kind.value,
-  );
+type Shape = Record<string, z.ZodType>;
+interface EventUnion {
+  options: { shape: Shape & { kind: { value: string } } }[];
+}
 const [engineEvents, narrativeEvents] = GameEventSchema.options as unknown as [
-  { options: unknown[] },
-  { options: unknown[] },
+  EventUnion,
+  EventUnion,
 ];
+const literalKinds = (union: EventUnion): string[] =>
+  union.options.map(({ shape }) => shape.kind.value);
+// Each event's payload fields: an engine or narrative event's sit beside its kind.
+const eventShapes: Record<string, Shape> = {
+  ...Object.fromEntries(
+    [...engineEvents.options, ...narrativeEvents.options].map(
+      ({ shape: { kind, ...rest } }) => [kind.value, rest],
+    ),
+  ),
+  ...Object.fromEntries(
+    Object.entries(dnd55e.eventSchemas).map(([kind, schema]) => [
+      kind,
+      (schema as unknown as { shape: Shape }).shape,
+    ]),
+  ),
+};
+const fieldsOf = (shape: Shape): string[] =>
+  Object.entries(shape)
+    .map(([key, value]) =>
+      value.safeParse(undefined).success ? `${key}?` : key,
+    )
+    .sort();
 const STORY_FRAMES = file.kinds.filter((kind) => kind.startsWith("story:"));
 
 // Every kind today's code knows. The story frames have no list, so a locked one counts as known
@@ -105,6 +130,32 @@ describe("event and frame kinds", () => {
 
   it("locks every kind the code has", () => {
     expect(current.filter((kind) => !file.kinds.includes(kind))).toEqual([]);
+  });
+
+  it("keeps every locked payload field, and adds only optional ones", () => {
+    expect(Object.keys(file.fields).sort()).toEqual(
+      Object.keys(eventShapes).sort(),
+    );
+    for (const [kind, shape] of Object.entries(eventShapes)) {
+      const locked = file.fields[kind] ?? [];
+      const now = fieldsOf(shape);
+      const bare = (field: string) => field.replace(/\?$/, "");
+      // Gone, or required where it was optional.
+      const broken = locked.filter(
+        (field) =>
+          !now.includes(field) &&
+          !(field === bare(field) && now.includes(`${field}?`)),
+      );
+      const added = now.filter(
+        (field) => !locked.some((old) => bare(old) === bare(field)),
+      );
+      expect(broken, `${kind} fields removed or made required`).toEqual([]);
+      expect(
+        added.filter((field) => field === bare(field)),
+        `${kind} gained a required field`,
+      ).toEqual([]);
+      expect(added, `${kind} fields to lock`).toEqual([]);
+    }
   });
 
   it("puts every kind in a golden save, or lists it as not there yet", async () => {
