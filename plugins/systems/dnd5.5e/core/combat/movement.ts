@@ -63,7 +63,7 @@ import {
   type Square,
   squareKey,
 } from "../grid.ts";
-import { seeing } from "../sight.ts";
+import { blindedTo, seeing, unseenInvisible } from "../sight.ts";
 import { hasTactic } from "../tactics.ts";
 import { ALL, FANCY_FOOTWORK, STAY } from "./ids.ts";
 import { grapplesOn } from "./grapple.ts";
@@ -178,7 +178,11 @@ export function provokers(
           sourceId === FANCY_FOOTWORK && casterId === actor.id,
       ) ||
       hasCondition(foe, ...INCAPACITATING) ||
-      (disengaged && !hasPassive(deriveStats(foe, access), "sentinel"))
+      (disengaged && !hasPassive(deriveStats(foe, access), "sentinel")) ||
+      // An Opportunity Attack is made only on a creature it can see.
+      blindedTo(foe, actor, access) ||
+      unseenInvisible(actor, foe, { ...access, state }) ||
+      seeing(foe, actor.position, state, access) === "none"
     ) {
       return [];
     }

@@ -8,6 +8,7 @@ import {
   INCAPACITATING,
   isDead,
   isDown,
+  unconscious,
   NS,
   frame,
 } from "../../state.ts";
@@ -20,6 +21,7 @@ import { grapplesOn } from "../grapple.ts";
 import {
   blindedTo,
   coverAgainst,
+  frightenedInSight,
   lightAt,
   seeing,
   unseenInvisible,
@@ -278,8 +280,8 @@ export function runAttackRoll(
             "petrified",
             "restrained",
             "stunned",
-            "unconscious",
           ) ||
+          unconscious(target) ||
           (hasCondition(target, "prone") && close) ||
           (hasPassive(stats, "grappledAdvantage") &&
             grapplesOn(target).some(
@@ -413,7 +415,7 @@ export function runAttackRoll(
     swornElsewhere(attacker, action, resolution, context) ||
     unseenTarget ||
     proneFar ||
-    dodging(target) ||
+    dodging(target, targetStats) ||
     duelHampers(attacker, target) ||
     grappledAwayFrom(attacker, target) ||
     hasFlag(
@@ -435,7 +437,8 @@ export function runAttackRoll(
     ) ||
     placedFlag(attacker, "disadvantage", "attacks", state, context, ability) ||
     placedFlag(target, "disadvantage", "attacksAgainst", state, context) ||
-    hasCondition(attacker, "frightened", "poisoned", "prone", "restrained") ||
+    hasCondition(attacker, "poisoned", "prone", "restrained") ||
+    frightenedInSight(attacker, state) ||
     blindedTo(attacker, target, context) ||
     unseenInvisible(target, attacker, context) ||
     warded(target, targetStats) ||
@@ -661,8 +664,8 @@ export function runAttackRoll(
     !hasPassive(targetStats, "noCriticals") &&
     (roll.natural >= critFrom ||
       (hits &&
-        isMelee(action) &&
-        hasCondition(target, "paralyzed", "unconscious")));
+        close &&
+        (hasCondition(target, "paralyzed") || unconscious(target))));
 
   const report = dndEvent(`${NS}:rollReported`, {
     actor: attacker.id,
