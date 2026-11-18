@@ -393,8 +393,28 @@
     Locations of bodies of water For example, you could determine the location
     of a powerful monster in the area, the locations of bodies of water, and the
     locations of any towns."
-  automation: text
-  outOfCombat: castingTime
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - lore
+              - way
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1
 - id: srd52:spell/conjure-animals
   name: Conjure Animals
   level: 3
@@ -600,8 +620,27 @@
     whether the Hallow spell is active there and, if so, where. The spell is
     blocked by 1 foot of stone, dirt, or wood; 1 inch of metal; or a thin sheet
     of lead.
-  automation: text
-  outOfCombat: utility
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - hidden
+            aid: advantage
+            once: true
+          duration:
+            minutes: 10
 - id: srd52:spell/disguise-self
   name: Disguise Self
   level: 1
@@ -646,8 +685,27 @@
     answer, such as the casting of other spells. If you cast the spell more than
     once before finishing a Long Rest, there is a cumulative 25 percent chance
     for each casting after the first that you get no answer.
-  automation: text
-  outOfCombat: utility
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - lore
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1
 - id: srd52:spell/dominate-monster
   name: Dominate Monster
   level: 8
@@ -982,8 +1040,27 @@
     natural weakness in the floor, an unstable ceiling, or a hidden sinkhole.
     This spell reveals that a trap is present but not its location. You do learn
     the general nature of the danger posed by a trap you sense.
-  automation: text
-  outOfCombat: utility
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - trap
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1
 - id: srd52:spell/fire-storm
   name: Fire Storm
   level: 7
@@ -1463,8 +1540,27 @@
     couched in figurative language or poetry, as determined by the GM. If the
     famous thing you chose isn’t actually famous, you hear sad musical notes
     played on a trombone, and the spell fails.
-  automation: text
-  outOfCombat: castingTime
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - lore
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1
 - id: srd52:spell/locate-animals-or-plants
   name: Locate Animals or Plants
   level: 2
@@ -1478,8 +1574,27 @@
   text: Describe or name a specific kind of Beast, Plant creature, or nonmagical
     plant. You learn the direction and distance to the closest creature or plant
     of that kind within 5 miles, if any are present.
-  automation: text
-  outOfCombat: utility
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - way
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1
 - id: srd52:spell/mage-hand
   name: Mage Hand
   level: 0
@@ -2139,8 +2254,27 @@
     about the size of your fist. Instead of targeting a creature, you can target
     a location you have seen. When you do so, the sensor appears at that
     location and doesn’t move.
-  automation: text
-  outOfCombat: castingTime
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - hidden
+            aid: advantage
+            once: true
+          duration:
+            minutes: 10
 - id: srd52:spell/sending
   name: Sending
   level: 3
@@ -3175,8 +3309,27 @@
     offer a short phrase as an answer. On a failed save, you take 6d6 Psychic
     damage and have the Incapacitated condition until you finish a Long Rest. A
     Greater Restoration spell cast on you ends this effect.
-  automation: text
-  outOfCombat: castingTime
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - lore
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1
 - id: srd52:spell/control-weather
   name: Control Weather
   level: 8
@@ -3327,8 +3480,28 @@
     the magic, and if an effect was created by a spell, you learn the spell’s
     school of magic. The spell is blocked by 1 foot of stone, dirt, or wood; 1
     inch of metal; or a thin sheet of lead.
-  automation: text
-  outOfCombat: utility
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - hidden
+              - lore
+            aid: advantage
+            once: true
+          duration:
+            minutes: 10
 - id: srd52:spell/disintegrate
   name: Disintegrate
   level: 6
@@ -4214,8 +4387,27 @@
     Flesh to Stone or Polymorph spell, this spell doesn’t locate the creature.
     This spell can’t locate a creature if any thickness of lead blocks a direct
     path between you and the creature.
-  automation: text
-  outOfCombat: utility
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - way
+            aid: advantage
+            once: true
+          duration:
+            minutes: 60
 - id: srd52:spell/magic-circle
   name: Magic Circle
   level: 3
@@ -6269,8 +6461,27 @@
     creatures, and magical contagions within 30 feet of yourself. You sense the
     kind of poison, creature, or contagion in each case. The spell is blocked by
     1 foot of stone, dirt, or wood; 1 inch of metal; or a thin sheet of lead.
-  automation: text
-  outOfCombat: utility
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - hidden
+            aid: advantage
+            once: true
+          duration:
+            minutes: 10
 - id: srd52:spell/dispel-evil-and-good
   name: Dispel Evil and Good
   level: 5
@@ -7209,8 +7420,27 @@
     nearest object of a particular kind, such as a certain kind of apparel,
     jewelry, furniture, tool, or weapon. This spell can’t locate an object if
     any thickness of lead blocks a direct path between you and the object.
-  automation: text
-  outOfCombat: utility
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - way
+            aid: advantage
+            once: true
+          duration:
+            minutes: 10
 - id: srd52:spell/magic-jar
   name: Magic Jar
   level: 6
@@ -7406,7 +7636,8 @@
     The target can be a willing creature, or it can be a place or an object no
     larger than 10 feet in any dimension. The target can’t be targeted by any
     Divination spell or perceived through magical scrying sensors.
-  automation: text
+  # no rules effect in play: nothing in it scries the party.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/phantom-steed
   name: Phantom Steed
@@ -8448,8 +8679,27 @@
     Bonus Action, you can move the eye up to 30 feet in any direction. A solid
     barrier blocks the eye’s movement, but the eye can pass through an opening
     as small as 1 inch in diameter.
-  automation: text
-  outOfCombat: utility
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - hidden
+            aid: advantage
+            once: true
+          duration:
+            minutes: 60
 - id: srd52:spell/astral-projection
   name: Astral Projection
   level: 9
@@ -9047,8 +9297,27 @@
     from the target’s mind, the target can take an action on its turn to make an
     Intelligence (Arcana) check against your spell save DC, ending the spell on
     a success.
-  automation: text
-  outOfCombat: utility
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - truth
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1
 - id: srd52:spell/dispel-magic
   name: Dispel Magic
   level: 3
@@ -10172,7 +10441,8 @@
     if it has the Invisible condition, it gains no benefit from that condition
     against you. Using a Higher-Level Spell Slot. The damage increases by 1d8
     for each spell slot level above 2.
-  automation: partial
+  # shortcut: no creature can see the target as Invisible, not only the caster.
+  automation: full
   activation:
     cost:
       - action
@@ -10192,6 +10462,13 @@
             dice: 3d8
           type: psychic
       onSuccessDamage: half
+      onFail:
+        - kind: modifier
+          modifier:
+            kind: outlined
+          duration:
+            concentration: true
+            minutes: 60
   upcast:
     perSlotLevel:
       addDice: 1d8
@@ -11262,8 +11539,27 @@
     might change the results. If you cast the spell more than once before
     finishing a Long Rest, there is a cumulative 25 percent chance for each
     casting after the first that you get no answer.
-  automation: text
-  outOfCombat: castingTime
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - lore
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1
 - id: srd52:spell/barkskin
   name: Barkskin
   level: 2
@@ -11483,8 +11779,27 @@
     Action, you can switch between seeing and hearing. A creature that sees the
     sensor (such as a creature benefiting from See Invisibility or Truesight)
     sees a luminous orb about the size of your fist.
-  automation: text
-  outOfCombat: castingTime
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - hidden
+            aid: advantage
+            once: true
+          duration:
+            minutes: 10
 - id: srd52:spell/commune
   name: Commune
   level: 5
@@ -11507,8 +11822,27 @@
     If you cast the spell more than once before finishing a Long Rest, there is
     a cumulative 25 percent chance for each casting after the first that you get
     no answer.
-  automation: text
-  outOfCombat: castingTime
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - lore
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1
 - id: srd52:spell/confusion
   name: Confusion
   level: 4
@@ -12091,8 +12425,27 @@
     as the destination, you know how far it is and in what direction it lies.
     Whenever you face a choice of paths along the way there, you know which path
     is the most direct.
-  automation: text
-  outOfCombat: castingTime
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - way
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1440
 - id: srd52:spell/fire-shield
   name: Fire Shield
   level: 4
@@ -12523,8 +12876,27 @@
     they are. If the item was created by a spell, you learn that spell’s name.
     If you instead touch a creature throughout the casting, you learn which
     ongoing spells, if any, are currently affecting it.
-  automation: text
-  outOfCombat: castingTime
+  # shortcut: what it reveals helps one check about it, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - lore
+            aid: advantage
+            once: true
+          duration:
+            minutes: 1
 - id: srd52:spell/insect-plague
   name: Insect Plague
   level: 5
