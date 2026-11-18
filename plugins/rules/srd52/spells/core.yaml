@@ -769,7 +769,12 @@
       onFail:
         - { kind: applyCondition, condition: prone, duration: instantaneous }
         - { kind: endConcentration }
-        - { kind: zone, zone: area, radius: 100, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 100,
+            duration: { concentration: true, minutes: 1 },
+          }
       onSuccess: []
       fissure: { count: 1d6, depth: { dice: 1d10, times: 10 } }
     area:
@@ -3649,7 +3654,12 @@
           condition: restrained
           duration: { concentration: true, minutes: 1 }
           escape: { ability: str, skill: athletics }
-        - { kind: zone, zone: area, radius: 10, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 10,
+            duration: { concentration: true, minutes: 1 },
+          }
       onSuccess: []
     area: { terrain: ground }
 - id: srd52:spell/fabricate
@@ -5438,7 +5448,12 @@
       damage: [{ amount: { dice: 10d6 }, type: cold }]
       onSuccessDamage: half
       onFail:
-        - { kind: zone, zone: wall, radius: 10, duration: { concentration: true, minutes: 10 } }
+        - {
+            kind: zone,
+            zone: wall,
+            radius: 10,
+            duration: { concentration: true, minutes: 10 },
+          }
       onSuccess: []
   upcast:
     perSlotLevel:
@@ -6971,7 +6986,8 @@
         kind: save
         ability: dex
         dc: { add: [{ kind: spellSaveDc }] }
-        onFail: [{ kind: applyCondition, condition: prone, duration: instantaneous }]
+        onFail:
+          [{ kind: applyCondition, condition: prone, duration: instantaneous }]
         onSuccess: []
 - id: srd52:spell/guidance
   name: Guidance
@@ -8230,7 +8246,8 @@
   # Radiant or Necrotic by the caster's alignment: the one its foes resist least.
   activation:
     cost: [action, slot]
-    targeting: { area: { shape: emanation, radius: 15 }, range: self, side: enemy }
+    targeting:
+      { area: { shape: emanation, radius: 15 }, range: self, side: enemy }
     resolution:
       kind: automatic
       effects:
@@ -8584,7 +8601,12 @@
           web: true
           duration: { concentration: true, minutes: 60 }
           escape: { ability: str, skill: athletics }
-        - { kind: zone, zone: haze, radius: 10, duration: { concentration: true, minutes: 60 } }
+        - {
+            kind: zone,
+            zone: haze,
+            radius: 10,
+            duration: { concentration: true, minutes: 60 },
+          }
       onSuccess: []
     area:
       terrain: ground
@@ -8835,7 +8857,12 @@
           condition: restrained
           duration: { concentration: true, minutes: 1 }
           escape: { ability: str, skill: athletics }
-        - { kind: zone, zone: area, radius: 10, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 10,
+            duration: { concentration: true, minutes: 1 },
+          }
       onSuccess: []
     area:
       terrain: ground
@@ -10086,7 +10113,12 @@
         - { amount: { dice: 4d6 }, type: cold }
       onSuccessDamage: half
       onFail:
-        - { kind: zone, zone: area, radius: 20, duration: { until: yourNextTurnEnd } }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 20,
+            duration: { until: yourNextTurnEnd },
+          }
       onSuccess: []
     area: { terrain: ice }
   upcast:
@@ -10875,7 +10907,12 @@
     resolution:
       kind: automatic
       effects:
-        - { kind: zone, zone: fog, radius: 20, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: zone,
+            zone: fog,
+            radius: 20,
+            duration: { concentration: true, minutes: 1 },
+          }
     area:
       terrain: ice
       when: turnStart
@@ -12644,7 +12681,8 @@
   # Candles and lanterns it snuffs change nothing in a fight.
   activation:
     cost: [action, slot]
-    targeting: { area: { shape: line, radius: 60, width: 10 }, range: self, side: enemy }
+    targeting:
+      { area: { shape: line, radius: 60, width: 10 }, range: self, side: enemy }
     resolution:
       kind: save
       ability: str
@@ -12806,7 +12844,12 @@
       damage: [{ amount: { dice: 4d10 }, type: piercing }]
       onSuccessDamage: half
       onFail:
-        - { kind: zone, zone: haze, radius: 20, duration: { concentration: true, minutes: 10 } }
+        - {
+            kind: zone,
+            zone: haze,
+            radius: 20,
+            duration: { concentration: true, minutes: 10 },
+          }
       onSuccess: []
     area:
       when: turnEnd
@@ -13624,7 +13667,12 @@
           feet: 100
           duration: { concentration: true, minutes: 1 }
           grab: { ability: dex, dc: { add: [{ kind: spellSaveDc }] } }
-        - { kind: zone, zone: area, radius: 50, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 50,
+            duration: { concentration: true, minutes: 1 },
+          }
     area:
       enters: true
       resolution:

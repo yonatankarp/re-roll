@@ -3646,7 +3646,10 @@ function statBlockStats(
       flatBonus: 0,
       passives,
     }),
-    speed: Math.max(0, (shape?.speed ?? monster.speed) - 5 * exhaustionOf(actor)),
+    speed: Math.max(
+      0,
+      (shape?.speed ?? monster.speed) - 5 * exhaustionOf(actor),
+    ),
     savingThrows: monster.saves,
     skills: [],
     expertise: [],
@@ -3687,7 +3690,8 @@ function statBlockStats(
     ),
     routines,
     creatureType: monster.creatureType?.toLowerCase(),
-    initiative: monster.initiative - 2 * exhaustionOf(actor) - (actor.ordeal ?? 0),
+    initiative:
+      monster.initiative - 2 * exhaustionOf(actor) - (actor.ordeal ?? 0),
     scaling: {},
     features: monster.features,
     resourceDefs: fromFeatures.resources,
@@ -3705,7 +3709,9 @@ function statBlockStats(
     speeds: Object.fromEntries(
       (["fly", "climb", "burrow", "swim"] as const).flatMap((mode) => {
         const feet = monster.speeds?.[mode];
-        return feet ? [[mode, Math.max(0, feet - 5 * exhaustionOf(actor))]] : [];
+        return feet
+          ? [[mode, Math.max(0, feet - 5 * exhaustionOf(actor))]]
+          : [];
       }),
     ),
   };

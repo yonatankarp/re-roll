@@ -621,7 +621,12 @@ export function runFinishMove(
       }),
       ...fogBoundEvents(arrived, context),
       ...(fields ? placedEvents(applyDndEvent(context.state, moved)) : []),
-      ...forcedThrough(walker, context.state, applyDndEvent(context.state, moved), context),
+      ...forcedThrough(
+        walker,
+        context.state,
+        applyDndEvent(context.state, moved),
+        context,
+      ),
       ...carriedEvents(walker, { x: payload.x, y: payload.y }, context),
       ...beenEvents(walker, { x: payload.x, y: payload.y }, context),
       ...revealedEvents(arrived, context),
@@ -879,7 +884,9 @@ export function teleportSquares(
     return [];
   }
   // No one teleports into or out of an Antimagic Field; a Leap isn't magic.
-  const field = movement === 0 && zonesOf(state).some((zone) => zone.area?.noSpells === "all");
+  const field =
+    movement === 0 &&
+    zonesOf(state).some((zone) => zone.area?.noSpells === "all");
   if (field && antimagicAt(from, state)) return [];
   // Boots of the Winding Path: only back to a square it stood on this turn.
   if (retrace) {

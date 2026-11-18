@@ -3782,13 +3782,14 @@ function zoneEvents(
   const settle = (written: AreaEffect | undefined) => {
     const printed =
       riders.length > 0
-        ? riders.reduce<AreaEffect>(
-            (sum, rider) => {
-              const places = [...(sum.places ?? []), ...(rider.places ?? [])];
-              return { ...sum, ...rider, ...(places.length > 0 ? { places } : {}) };
-            },
-            written ?? {},
-          )
+        ? riders.reduce<AreaEffect>((sum, rider) => {
+            const places = [...(sum.places ?? []), ...(rider.places ?? [])];
+            return {
+              ...sum,
+              ...rider,
+              ...(places.length > 0 ? { places } : {}),
+            };
+          }, written ?? {})
         : written;
     // A higher slot widens what the area shields, as Globe of Invulnerability's.
     const area =
@@ -3801,7 +3802,9 @@ function zoneEvents(
     const { layers, usesPerSlot, ...kept } = area ?? {};
     const fixedLayers = layers?.flatMap((layer) => fixed(layer) ?? []);
     const uses =
-      kept.uses === undefined ? undefined : kept.uses + (usesPerSlot ?? 0) * above;
+      kept.uses === undefined
+        ? undefined
+        : kept.uses + (usesPerSlot ?? 0) * above;
     return {
       area: area
         ? {
@@ -3840,7 +3843,14 @@ function zoneEvents(
     // A line runs out from its caster, or, cast farther off, across the way to where it's aimed.
     const line =
       effect.shape === "line" && actor.position
-        ? lineFrom(actor.position, at, radius, !effect.follows && "range" in targeting && targeting.range !== "self")
+        ? lineFrom(
+            actor.position,
+            at,
+            radius,
+            !effect.follows &&
+              "range" in targeting &&
+              targeting.range !== "self",
+          )
         : null;
     const origin = line?.at ?? centre;
     const shaped: Zone = {
@@ -3985,7 +3995,13 @@ function fissureEvents(
     .slice(0, count);
   const events: SystemEvent[] = [];
   for (const foe of foes) {
-    const save = rollSave(foe, ability, dc, context, action.spellLevel !== null);
+    const save = rollSave(
+      foe,
+      ability,
+      dc,
+      context,
+      action.spellLevel !== null,
+    );
     events.push(...save.events);
     if (save.saved) continue;
     frames.push(frame("fall", { actors: [foe.id], feet: depth }));
@@ -4347,8 +4363,13 @@ function wallRing(
   const squares: string[] = [];
   const pushed: SystemEvent[] = [];
   const onWall = (square: Square): boolean =>
-    zone.shape ? inZone(zone, square) : distanceFeet(centre, square) === zone.radius;
-  for (const key of squaresOf({ ...zone, shape: zone.shape ?? "ring" }, state)) {
+    zone.shape
+      ? inZone(zone, square)
+      : distanceFeet(centre, square) === zone.radius;
+  for (const key of squaresOf(
+    { ...zone, shape: zone.shape ?? "ring" },
+    state,
+  )) {
     const square = parseSquare(key);
     if (!square || !onWall(square) || walls.has(key)) continue;
     const standing = pushes ? taken.get(key) : undefined;

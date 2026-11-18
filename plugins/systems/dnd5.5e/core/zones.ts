@@ -292,7 +292,8 @@ const PLACED = "placed:";
 // Antimagic Field's are.
 export function placedConditionEvents(state: DndState): SystemEvent[] {
   const placing = castZones(state).filter(
-    (zone) => zone.area?.conditions || zone.area?.places,
+    (zone) =>
+      zone.area?.conditions !== undefined || zone.area?.places !== undefined,
   );
   const keyOf = (zone: Zone): string =>
     `${PLACED}${zone.sourceId}${zone.part === undefined ? "" : `#${String(zone.part)}`}`;
@@ -658,7 +659,10 @@ export function deflection(
   if (!from || !to) return null;
   const zones = zonesOf(state).filter((zone) => zone.area?.deflects);
   if (zones.length === 0) return null;
-  const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) * 4));
+  const steps = Math.max(
+    1,
+    Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) * 4),
+  );
   const hit = zones.filter((zone) => {
     for (let step = 0; step <= steps; step += 1) {
       const point = {

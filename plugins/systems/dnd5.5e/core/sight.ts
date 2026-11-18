@@ -161,7 +161,8 @@ function squaresCover(
 const withZones = (
   map: ReadonlySet<string>,
   zones: readonly string[],
-): ReadonlySet<string> => (zones.length === 0 ? map : new Set([...map, ...zones]));
+): ReadonlySet<string> =>
+  zones.length === 0 ? map : new Set([...map, ...zones]);
 
 // What cover adds to AC and Dexterity saves. Total cover has no bonus, since nothing can target through it.
 export function coverBonus(cover: Cover): number {

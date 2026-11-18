@@ -1388,7 +1388,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     width: z.number().int().min(5).optional(),
     // this radius instead while its caster has this feature, as Aquatic Affinity's 10-foot Wrath of the Sea
     wider: z
-      .strictObject({ feature: ContentIdSchema, radius: z.number().int().min(5) })
+      .strictObject({
+        feature: ContentIdSchema,
+        radius: z.number().int().min(5),
+      })
       .optional(),
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
