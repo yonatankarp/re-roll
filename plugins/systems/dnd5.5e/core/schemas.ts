@@ -985,6 +985,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("retypeHit"),
     types: z.array(DamageTypeSchema).min(2),
   }),
+  // A roll on the table the content entry `from` holds (its `table`, TableSchema), as a Wand of Wonder's effects
+  // (combat/reactions.ts tableRoll), aimed at the action's target.
+  z.strictObject({ kind: z.literal("rollTable"), from: ContentIdSchema }),
   // Damage to the one taking the action, with `creatureTypes` only when the target is one of these, as Blackrazor's
   // 1d10 Necrotic to its wielder for hitting an Undead or a Book of Vile Darkness's Vile Speech to its reader.
   z.strictObject({
@@ -3446,6 +3449,17 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
     // with `school`, a spell of any casting time cast with a slot, as Arcane Ward's Abjuration spells
     slotted: z.literal(true).optional(),
+    // A spell of one of these classes' lists (by name after the plugin) cast with a slot, as a Sorcerer spell for
+    // Wild Magic Surge; with `chance` only when a d`die` shows `at` or more, once a turn, as its d20 of 20.
+    classes: z.array(z.string().min(1)).min(1).optional(),
+    chance: z
+      .strictObject({
+        die: z.number().int().min(2),
+        at: z.number().int().min(1),
+      })
+      .optional(),
+    // the table the content entry `from` holds is rolled on, aimed at the spell's first target (combat/school.ts)
+    rollTable: ContentIdSchema.optional(),
     // its `effects` go to the most hurt of the bearer's allies of these types within `within` instead, as Undead
     // Vitality's healing of an Undead
     toAlly: z
@@ -3743,6 +3757,7 @@ export const FeatureSchema = ContentEntrySchema.extend({
   passives: z.array(PassiveSchema).default([]),
   activations: z.array(ActivationSchema).default([]),
   resources: z.array(ResourceDefSchema).default([]),
+  table: TableSchema.optional(), // a table it rolls on, which `rollTable` names it for, as Wild Magic Surge's
   fromLevel: z.number().int().min(1).max(20).optional(), // the character level it starts working at
   // Dice added to its activations at character levels 5, 11 and 17, as a cantrip's are.
   perTier: ScaleStepSchema.optional(),
@@ -4446,6 +4461,7 @@ const MagicItemSchema = ItemBaseSchema.extend({
   attunement: z.boolean(),
   attunementBy: z.string().min(1).optional(),
   attuneBy: AttuneBySchema.optional(), // what `attunementBy` asks, as the engine checks it
+  table: TableSchema.optional(), // a table it rolls on, which `rollTable` names it for, as a Wand of Wonder's
   curse: CurseSchema.optional(),
   // A save attuning to it calls for, whose failure is the attuner's end, as the Wand of Orcus's Constitution save
   // (actions.ts attuneSave): a creature of one of `unless` makes none, and a success takes `saved`, as the wand's 10d6

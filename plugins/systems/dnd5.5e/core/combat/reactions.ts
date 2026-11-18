@@ -30,6 +30,9 @@ import {
   DamageTypeSchema,
   type LeafEffect,
   SpellSchema,
+  FeatureSchema,
+  ItemSchema,
+  type Table,
   type TableRow,
   WeaponSchema,
 } from "../schemas.ts";
@@ -1839,6 +1842,16 @@ export function rollOnTable(
     undefined,
     spellLevel,
     context,
+  );
+}
+
+// The table a feature or magic item holds, which a `rollTable` names it for.
+export function tableOf(from: string, context: Context): Table | undefined {
+  const entry = context.content(from);
+  const item = ItemSchema.safeParse(entry).data;
+  return (
+    FeatureSchema.safeParse(entry).data?.table ??
+    (item?.type === "magicItem" ? item.table : undefined)
   );
 }
 

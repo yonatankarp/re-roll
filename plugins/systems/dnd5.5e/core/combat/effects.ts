@@ -136,6 +136,8 @@ import {
   beforeFailedSave,
   playerTakes,
   slotRefund,
+  tableOf,
+  tableRoll,
 } from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
 import { fueledDamage } from "./school.ts";
@@ -3099,6 +3101,7 @@ export function leafEvents(
       case "reactionAttack":
       case "reactionMove":
       case "randomAction":
+      case "rollTable":
       case "raiseCorpse":
       case "reduceDamage":
       case "acAgainstHit":
@@ -4653,6 +4656,22 @@ export function resolveAction(
             );
             events.push(...made.events);
             frames.push(...made.frames);
+          }
+          if (effect.kind === "rollTable") {
+            const table = tableOf(effect.from, context);
+            if (table) {
+              const rolled = tableRoll(
+                table,
+                action,
+                actor,
+                undefined,
+                target,
+                slotLevel ?? action.spellLevel ?? 0,
+                context,
+              );
+              events.push(...rolled.events);
+              frames.push(...rolled.frames);
+            }
           }
           if (effect.kind === "randomAction") {
             const rolled = rolledActions(

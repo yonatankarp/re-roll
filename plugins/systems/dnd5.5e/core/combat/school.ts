@@ -13,6 +13,7 @@ import {
   evaluateFormula,
   type KnownAction,
   lookup,
+  onClassList,
   spellModifier,
   spellSaveDc,
   type Stats,
@@ -20,6 +21,7 @@ import {
 import { HIT_DICE, spellOfSource } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
 import { leafEvents, rollSave } from "./effects.ts";
+import { tableOf, tableRoll } from "./reactions.ts";
 import { teleportFrame } from "./movement.ts";
 import type { Context } from "./queries.ts";
 
@@ -189,6 +191,7 @@ export function castRiders(
   ]);
   const school = schoolOf(action.id, context);
   const stats = deriveStats(actor, context);
+  const surged: SystemEvent[] = [];
   const rides = stats.passives.flatMap((passive) => {
     if (passive.kind !== "castRider") return [];
     if (
@@ -197,6 +200,37 @@ export function castRiders(
         (stats.resources[passive.resource] ?? 0)
     ) {
       return [];
+    }
+    // Wild Magic Surge: a spell of the class's list cast with a slot, once a turn behind its die.
+    if (passive.classes) {
+      const spellId = spellOfSource(action.id);
+      const spell = spellId
+        ? SpellSchema.safeParse(context.content(spellId)).data
+        : undefined;
+      if (
+        slotLevel === undefined ||
+        !spell ||
+        !onClassList(spell, passive.classes) ||
+        (passive.chance && actor.usedThisTurn.includes(SURGE))
+      ) {
+        return [];
+      }
+      if (passive.chance) {
+        surged.push(
+          dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key: SURGE }),
+        );
+        const die = context.dice.roll(passive.chance.die);
+        surged.push(
+          dndEvent(`${NS}:dieRolled`, {
+            actor: actor.id,
+            die: passive.chance.die,
+            rolled: die,
+            label: "Wild Magic Surge",
+          }),
+        );
+        if (die < passive.chance.at) return [];
+      }
+      return [passive];
     }
     const fits = passive.uses
       ? passive.uses.some(
@@ -237,9 +271,28 @@ export function castRiders(
             context,
           );
         });
+  // A surge's table, rolled at the spell's first target, as the Wild Magic Surge table.
+  const tables = rides.flatMap(({ rollTable }) => {
+    const table = rollTable ? tableOf(rollTable, context) : undefined;
+    return table
+      ? [
+          tableRoll(
+            table,
+            action,
+            actor,
+            undefined,
+            targets.find((target) => target.id !== actor.id),
+            slotLevel ?? action.spellLevel ?? 0,
+            context,
+          ),
+        ]
+      : [];
+  });
   return {
     events: [
+      ...surged,
       ...mended,
+      ...tables.flatMap((rolled) => rolled.events),
       ...rides.flatMap(({ effects, onTargets, resource, toAlly }) => [
         ...(resource
           ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
@@ -263,24 +316,29 @@ export function castRiders(
           : []),
       ]),
     ],
-    frames: rides.flatMap(({ effects, choices }) => [
-      ...(choices ? riderChoiceFrame(actor, choices, action, context) : []),
-      ...effects.flatMap((effect) =>
-        effect.kind === "teleport"
-          ? [
-              teleportFrame(
-                actor,
-                effect.feet,
-                effect.movement,
-                context,
-                effect.provokes,
-              ),
-            ]
-          : [],
-      ),
-    ]),
+    frames: [
+      ...tables.flatMap((rolled) => rolled.frames),
+      ...rides.flatMap(({ effects, choices }) => [
+        ...(choices ? riderChoiceFrame(actor, choices, action, context) : []),
+        ...effects.flatMap((effect) =>
+          effect.kind === "teleport"
+            ? [
+                teleportFrame(
+                  actor,
+                  effect.feet,
+                  effect.movement,
+                  context,
+                  effect.provokes,
+                ),
+              ]
+            : [],
+        ),
+      ]),
+    ],
   };
 }
+
+const SURGE = "wild-magic-surge";
 
 type Choice = NonNullable<
   Extract<Passive, { kind: "castRider" }>["choices"]
