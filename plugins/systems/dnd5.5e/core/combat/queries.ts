@@ -55,6 +55,7 @@ import {
   encodeOption,
   spellOfSource,
   THROW_PREFIX,
+  itemUseOf,
   weaponItemId,
 } from "./ids.ts";
 import { markedBy } from "../trait-rules.ts";
@@ -147,6 +148,7 @@ export function hasFlag(
       // spell attacks or Concentration saves too.
       (!("spells" in modifier) || !modifier.spells) &&
       (!("ranged" in modifier) || !modifier.ranged) &&
+      (modifier.kind !== "disadvantage" || !modifier.weapon) &&
       (!("spellAttacks" in modifier) || !modifier.spellAttacks) &&
       (!("concentration" in modifier) || !modifier.concentration) &&
       (!("casterSpells" in modifier) || !modifier.casterSpells) &&
@@ -875,6 +877,19 @@ export function pactWeaponId(
 }
 
 // Whether a hit with this action is one a rider of this kind answers (schemas.ts HitKindSchema).
+// A magic weapon's own strike option answers only a hit with that weapon, as a Staff of Striking's charges as a
+// Quarterstaff; any other item's answers any hit its trigger allows.
+export function itemFits(
+  action: KnownAction,
+  hitWith: KnownAction,
+  access: Pick<ContentAccess, "content">,
+): boolean {
+  const item = itemUseOf(action.id);
+  if (item === null) return true;
+  const weapon = ItemSchema.safeParse(access.content(item)).data;
+  return weapon?.type !== "weapon" || weaponItemId(hitWith.id) === item;
+}
+
 export function hitFits(
   kind: HitKind,
   hitWith: KnownAction,

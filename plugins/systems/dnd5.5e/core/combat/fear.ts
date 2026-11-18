@@ -176,9 +176,28 @@ export function shakeable(actor: Actor, state: DndState): readonly Actor[] {
       item.side === actor.side &&
       !isDead(item) &&
       distanceFeet(actor.position, item.position) <= 5 &&
-      item.activeEffects.some(({ shake }) => shake),
+      item.activeEffects.some(
+        ({ shake, escape }) => shake === true || escape !== undefined,
+      ),
   );
 }
+
+// The effect on `target` an ally's check can free it from, as Ensnaring Strike's vines, when nothing shakes it free.
+export const escapeFrom = (target: Actor): ActiveEffect | undefined =>
+  target.activeEffects.some(({ shake }) => shake)
+    ? undefined
+    : target.activeEffects.find(({ escape }) => escape);
+
+// A successful escape check ends every effect of that source and caster.
+export const escapedEvents = (
+  actor: Actor,
+  effect: ActiveEffect,
+): SystemEvent[] =>
+  actor.activeEffects.flatMap((item) =>
+    item.sourceId === effect.sourceId && item.casterId === effect.casterId
+      ? [ended(actor, item)]
+      : [],
+  );
 
 // Shaking a creature ends every effect on it that another's action ends.
 export function shakeEvents(target: Actor): SystemEvent[] {
@@ -190,7 +209,9 @@ export function shakeEvents(target: Actor): SystemEvent[] {
 // The effects `actor` can spend its action to save against, as Irresistible Dance.
 export const collectable = (actor: Actor): readonly ActiveEffect[] =>
   actor.activeEffects.filter(
-    (effect) => effect.actionSave && effect.repeatSave,
+    (effect) =>
+      (effect.actionSave === true && effect.repeatSave !== undefined) ||
+      effect.escape !== undefined,
   );
 
 // The save of one of them, ending every effect of that source and caster on a success.

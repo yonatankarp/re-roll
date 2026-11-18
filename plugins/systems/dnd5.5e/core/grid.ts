@@ -277,6 +277,7 @@ export function inArea(
   origin: Square | null,
   aim: Square | null,
   point: Square | null,
+  width = SQUARE_FEET, // a line's, in feet
 ): boolean {
   if (!origin || !aim || !point) return true;
   switch (shape) {
@@ -299,8 +300,10 @@ export function inArea(
       if (along <= 0 || along * SQUARE_FEET > size + SQUARE_FEET / 2) {
         return false;
       }
-      // A cone is as wide as it is far from its point; a line is one square wide.
-      return shape === "cone" ? across <= along / 2 + 0.5 : across <= 0.75;
+      // A cone is as wide as it is far from its point; a line is one square wide, or as wide as it's given.
+      return shape === "cone"
+        ? across <= along / 2 + 0.5
+        : across <= 0.75 + (width - SQUARE_FEET) / SQUARE_FEET / 2;
     }
   }
 }

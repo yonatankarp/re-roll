@@ -754,7 +754,7 @@
     action to make a Strength (Athletics) check against your spell save DC. On a
     success, the spell ends. Using a Higher-Level Spell Slot. The damage
     increases by 1d6 for each spell slot level above 1.
-  automation: partial
+  automation: full
   activation:
     cost:
       - bonusAction
@@ -775,6 +775,9 @@
       onFail:
         - kind: applyCondition
           condition: restrained
+          escape:
+            ability: str
+            skill: athletics
           duration:
             concentration: true
             minutes: 1
@@ -2239,7 +2242,7 @@
     of these d8s you can add to the spell’s damage equals your spellcasting
     ability modifier. Cantrip Upgrade. The damage increases by 1d8 when you
     reach levels 5 (2d8), 11 (3d8), and 17 (4d8)."
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -2254,6 +2257,9 @@
       damage:
         - amount:
             dice: 1d8
+            explode:
+              add:
+                - kind: spellMod
           type: acid
           types:
             - acid
@@ -5699,7 +5705,7 @@
     for each spell slot level above 1. The orb can leap a maximum number of
     times equal to the level of the slot expended, and a creature can be
     targeted only once by each casting of this spell.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -5725,6 +5731,9 @@
             - thunder
       onHit: []
       onMiss: []
+      leap:
+        feet: 30
+        max: slotLevel
   upcast:
     perSlotLevel:
       addDice: 1d8
@@ -7294,7 +7303,21 @@
     damage. Cantrip Upgrade. The damage increases by 1d8 when you reach levels 5
     (2d8), 11 (3d8), and 17 (4d8).
   automation: partial
+  # Its light waits on lights that follow a creature (#172).
   activation:
+    cost:
+      - bonusAction
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: grantedAction
+          duration:
+            minutes: 10
+  granted:
     cost:
       - action
     targeting:
@@ -7543,6 +7566,7 @@
     the Invisible condition. Using a Higher-Level Spell Slot. The damage
     increases by 1d6 for each spell slot level above 2.
   automation: partial
+  # Only the light round its target waits, on lights that follow a creature (#172).
   activation:
     cost:
       - bonusAction
@@ -12797,6 +12821,7 @@
     Upgrade. The damage increases by 1d8 when you reach levels 5 (2d8), 11
     (3d8), and 17 (4d8).
   automation: partial
+  # Only the Dim Light round its target waits, on lights that follow a creature (#172).
   activation:
     cost:
       - action

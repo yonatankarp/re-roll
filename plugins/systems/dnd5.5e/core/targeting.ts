@@ -80,7 +80,7 @@ export function covers(
     x: origin.x + (aim.x - origin.x) * out,
     y: origin.y + (aim.y - origin.y) * out,
   };
-  return inArea(shape, radius, origin, centre, point);
+  return inArea(shape, radius, origin, centre, point, targeting.area.width);
 }
 
 // Everyone an area would catch: both sides, and the caster if they stand in it. A helpful area only
