@@ -27,6 +27,8 @@ export interface Entity {
   readonly library: readonly string[]; // heading ids the entity says it describes
   readonly about: readonly string[]; // a ruling's: the entity ids it rules on
   readonly lore?: boolean; // a system's lore kind, such as a rules glossary term: linked only where a rule asks
+  readonly reprint?: string; // an older entry's: its version in the edition the game plays
+  readonly linkOnly?: boolean; // an adventure's own: linked only by its `library`, never matched by name
 }
 
 const RuleSchema = z.strictObject({
@@ -45,6 +47,8 @@ const RuleSchema = z.strictObject({
   site: z.string().optional(),
   // "structural", or the kind of entity the heading names. Unset: on to the next rule.
   is: z.string().optional(),
+  // An older book's: a heading naming no entity of its own edition links to its reprint in this edition, by name.
+  reprints: z.string().optional(),
 });
 export type Rule = z.infer<typeof RuleSchema>;
 
@@ -122,6 +126,7 @@ export function indexEntities(entities: readonly Entity[]): EntityIndex {
     if (key) map.set(key, [...(map.get(key) ?? []), entity]);
   };
   for (const entity of entities) {
+    if (entity.linkOnly) continue;
     const tail = entity.id.slice(entity.id.indexOf("/") + 1);
     const name = slug(entity.name);
     const keys = new Set([
@@ -319,6 +324,15 @@ export function classifyBook(
 
     for (const rule of coverage?.rules ?? []) {
       if (!applies(rule, heading)) continue;
+      // Its own edition's entity first, then the reprint the rule names.
+      const match = (kinds: readonly string[] | null, asked = false) =>
+        matchHeading(index, heading.text, scope(kinds, asked)) ??
+        (rule.reprints === undefined
+          ? undefined
+          : matchHeading(index, heading.text, {
+              ...scope(kinds, asked),
+              edition: rule.reprints,
+            }));
       if (rule.family !== undefined) {
         const one = matchHeading(index, heading.text, scope([rule.family]));
         const kids = below(at).filter((i) => plain[i]).length;
@@ -335,15 +349,12 @@ export function classifyBook(
       }
       if (rule.match !== undefined) {
         const kinds = rule.match === "any" ? null : rule.match;
-        const hit = matchHeading(index, heading.text, scope(kinds, true));
+        const hit = match(kinds, true);
         if (hit) return linked(heading, hit);
       }
       if (rule.is === undefined) continue;
       // A heading the rule says names an entity of a kind links only to an entity of that kind.
-      const hit =
-        rule.is === STRUCTURAL
-          ? plain[at]
-          : matchHeading(index, heading.text, scope([rule.is]));
+      const hit = rule.is === STRUCTURAL ? plain[at] : match([rule.is]);
       return hit ? linked(heading, hit) : decide(heading, rule.is);
     }
     const hit = plain[at];
@@ -386,7 +397,9 @@ export async function checkCoverage(
   );
   const entities: Entity[] = [];
   for (const [plugin, record] of catalog.plugins) {
-    if (record.manifest.kind !== "rules") continue;
+    // An adventure's own entities, such as a stat block it prints, count only where they name a heading.
+    const linkOnly = record.manifest.kind === "adventure";
+    if (record.manifest.kind !== "rules" && !linkOnly) continue;
     const edition = editionOf(plugin) ?? "";
     for (const file of record.files) {
       if (!/^[^/]+\/[^/]+\.yaml$/.test(file)) continue;
@@ -399,8 +412,10 @@ export async function checkCoverage(
           name?: unknown;
           library?: unknown;
           about?: unknown;
+          reprint?: unknown;
         } | null;
         if (typeof entry?.id !== "string") continue;
+        if (linkOnly && !Array.isArray(entry.library)) continue;
         const kind = /^[^:]+:([^/]+)\//.exec(entry.id)?.[1] ?? "";
         const ids = (list: unknown): string[] =>
           Array.isArray(list)
@@ -415,6 +430,10 @@ export async function checkCoverage(
           library: ids(entry.library),
           about: ids(entry.about),
           lore: lore.has(kind),
+          ...(linkOnly ? { linkOnly } : {}),
+          ...(typeof entry.reprint === "string"
+            ? { reprint: entry.reprint }
+            : {}),
         });
       }
     }
@@ -517,6 +536,17 @@ export async function checkCoverage(
         file: null,
         message: `${entity.id} rules on ${id}, which no entity has`,
       });
+    const reprint =
+      entity.reprint === undefined ? undefined : index.byId.get(entity.reprint);
+    if (
+      entity.reprint !== undefined &&
+      (reprint?.kind !== entity.kind || reprint.edition === entity.edition)
+    )
+      issues.push({
+        plugin: entity.plugin,
+        file: null,
+        message: `${entity.id}'s reprint ${entity.reprint} is no ${entity.kind} of another edition`,
+      });
   }
   return { books, entities, issues };
 }
@@ -535,13 +565,27 @@ export function formatCoverage(report: CoverageReport): string[] {
       .join(", ");
   };
   const all = report.books.flatMap((book) => book.verdicts);
-  const sums = (verdicts: readonly Verdict[]) =>
-    `${String(verdicts.length)} headings: ${String(count(verdicts, "linked"))} linked, ${String(count(verdicts, STRUCTURAL))} structural, ${String(count(verdicts, "missing"))} missing`;
+  const editions = new Map(
+    report.entities.map((entity) => [entity.id, entity]),
+  );
+  // Linked to an entity of another edition, or to an older one reprinted there: reference text, not played.
+  const reprinted = (verdicts: readonly Verdict[], edition: string) => {
+    const n = verdicts.filter(({ entity }) => {
+      const found = entity === undefined ? undefined : editions.get(entity);
+      return (
+        found !== undefined &&
+        (found.edition !== edition || found.reprint !== undefined)
+      );
+    }).length;
+    return n > 0 ? ` (${String(n)} to a reprint)` : "";
+  };
+  const sums = (verdicts: readonly Verdict[], edition?: string) =>
+    `${String(verdicts.length)} headings: ${String(count(verdicts, "linked"))} linked${edition === undefined ? "" : reprinted(verdicts, edition)}, ${String(count(verdicts, STRUCTURAL))} structural, ${String(count(verdicts, "missing"))} missing`;
   return [
     `Library coverage, ${String(report.books.length)} books, ${sums(all)}`,
-    ...report.books.map(({ book, verdicts }) => {
+    ...report.books.map(({ book, edition, verdicts }) => {
       const missing = byKind(verdicts);
-      return `  ${book}: ${sums(verdicts)}${missing ? ` (${missing})` : ""}`;
+      return `  ${book}: ${sums(verdicts, edition)}${missing ? ` (${missing})` : ""}`;
     }),
     ...(all.length > 0 ? [`Missing by kind: ${byKind(all) || "none"}`] : []),
   ];

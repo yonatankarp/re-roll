@@ -36,6 +36,9 @@ import {
   obscuring,
   statsOf,
   thornKeys,
+  coverKeys,
+  hazed,
+  zoneModifiers,
   type ZoneKind,
 } from "./zones.ts";
 
@@ -117,10 +120,23 @@ export function coverFor(
   access?: ContentAccess,
 ): Cover {
   const found = squaresCover(state, from, target, ignore);
-  return found !== "total" && access && coveredByHost(target, state, access)
+  return found !== "total" &&
+    access &&
+    (coveredByHost(target, state, access) || shielded(target, state, access))
     ? (Math.max(found, 2) as Cover)
     : found;
 }
+
+// Half Cover an effect or an area gives, as Bulwark of Force's.
+const shielded = (
+  target: Actor,
+  state: DndState,
+  access: ContentAccess,
+): boolean =>
+  target.activeEffects.some(({ modifier }) => modifier.kind === "halfCover") ||
+  zoneModifiers(target, state, access).some(
+    (modifier) => modifier.kind === "halfCover",
+  );
 
 function squaresCover(
   state: DndState,
@@ -146,12 +162,21 @@ function squaresCover(
     // it; tell seeing from aiming here if attacks at unseen creatures across one should play.
     blockingSet(state, "sight"),
     {
-      half: setOf(terrain?.half),
-      threeQuarters: setOf(terrain?.threeQuarters),
+      half: withZones(setOf(terrain?.half), coverKeys(state, "half")),
+      threeQuarters: withZones(
+        setOf(terrain?.threeQuarters),
+        coverKeys(state, "threeQuarters"),
+      ),
     },
     creatures,
   );
 }
+
+const withZones = (
+  map: ReadonlySet<string>,
+  zones: readonly string[],
+): ReadonlySet<string> =>
+  zones.length === 0 ? map : new Set([...map, ...zones]);
 
 // What cover adds to AC and Dexterity saves. Total cover has no bonus, since nothing can target through it.
 export function coverBonus(cover: Cover): number {
@@ -395,12 +420,14 @@ export function seeing(
     return reaches(feet, through) ? "clear" : "none";
   }
   const light = lightAt(at, state, access);
-  if (light === "bright") return "clear";
-  if (reaches(feet, senses.devilsSight)) return "clear";
-  if (light === "dark" && reaches(feet, senses.truesight)) return "clear";
+  // A Lightly Obscured area, as Web's strands, is seen only dimly, however bright.
+  const clear = hazed(at, state) ? "dim" : "clear";
+  if (light === "bright") return clear;
+  if (reaches(feet, senses.devilsSight)) return clear;
+  if (light === "dark" && reaches(feet, senses.truesight)) return clear;
   const inRange = reaches(feet, senses.darkvision);
   if (light === "dark") return inRange ? "dim" : "none";
-  return inRange ? "clear" : "dim";
+  return inRange ? clear : "dim";
 }
 
 // The cover `target` has against what `actor` does to it. From inside its swallower there is none, wherever

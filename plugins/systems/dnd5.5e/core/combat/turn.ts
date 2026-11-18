@@ -79,6 +79,7 @@ import {
   burstEvents,
   concentrationFrame,
   dealEvents,
+  leafEvents,
   rollSave,
 } from "./effects.ts";
 import { grapplesOn, releasedGrapples } from "./grapple.ts";
@@ -105,6 +106,7 @@ import {
   antimagicEvents,
   healingStopped,
   placedConditionEvents,
+  zoneCureEvents,
 } from "../zones.ts";
 import { madnessStart } from "./madness.ts";
 import { headsLeft, headsOf, regrowEvents } from "./heads.ts";
@@ -440,7 +442,7 @@ function outOfCover(actor: Actor, context: Context): SystemEvent[] {
 }
 
 // Effects that end as the bearer's turn ends in Bright Light, as Cloak of Shadows', and those of anyone who has become
-// Incapacitated, as Draconic Flight's wings. shortcut: the second is checked as each turn ends, not the moment it comes.
+// Incapacitated, as Draconic Flight's wings, or whose caster has, as Bulwark of Force's. shortcut: the second is checked as each turn ends, not the moment it comes.
 function lightAndWakeEnds(
   actor: Actor | undefined,
   context: Context,
@@ -448,11 +450,23 @@ function lightAndWakeEnds(
   const { state } = context;
   return Object.values(state.actors).flatMap((bearer) =>
     bearer.activeEffects.flatMap(
-      ({ endsInLight, untilIncapacitated, sourceId, casterId }) =>
+      ({
+        endsInLight,
+        untilIncapacitated,
+        casterIncapacitated,
+        sourceId,
+        casterId,
+      }) =>
         (endsInLight &&
           bearer.id === actor?.id &&
           lightAt(bearer.position, state, context) === "bright") ||
-        (untilIncapacitated && hasCondition(bearer, ...INCAPACITATING))
+        (untilIncapacitated && hasCondition(bearer, ...INCAPACITATING)) ||
+        (casterIncapacitated &&
+          ((caster) =>
+            !caster ||
+            isDead(caster) ||
+            isDown(caster) ||
+            hasCondition(caster, ...INCAPACITATING))(state.actors[casterId]))
           ? [
               dndEvent(`${NS}:effectEnded`, {
                 actor: bearer.id,
@@ -484,6 +498,7 @@ export function runFinishTurn(context: Context): SystemResult {
     ...(actor ? outOfCover(actor, context) : []),
     ...lightAndWakeEnds(actor, context),
     ...suffocationEvents(actor, context),
+    ...(actor ? blinkEvents(actor, context) : []),
   ];
   for (const { actor: target, effect, save } of repeated) {
     const { sourceId, casterId, modifier } = effect;
@@ -725,6 +740,7 @@ export function runAdvanceTurn(
     ...(next ? shakeOffEvents(next, { ...context, state: after }, true) : []),
     ...(next ? reverseGravityEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
+    ...(next ? turnTempHpEvents(next, { ...context, state: after }) : []),
     ...(next ? regenerationEvents(next, context) : []),
     ...(next ? uncommandedEvents(next, after) : []),
     ...grappled.events,
@@ -733,6 +749,7 @@ export function runAdvanceTurn(
     ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
     ...antimagicEvents(after),
     ...placedConditionEvents(after),
+    ...zoneCureEvents(after, context),
     ...drifted.events,
     ...reactiveEvents(after, context),
   ];
@@ -1119,4 +1136,44 @@ function uncommandedEvents(actor: Actor, state: DndState): SystemEvent[] {
       },
     }),
   ];
+}
+
+// Heroism: Temporary Hit Points as the bearer's turn starts, from its caster's numbers, the best of them.
+function turnTempHpEvents(actor: Actor, context: Context): SystemEvent[] {
+  const gains = actor.activeEffects.flatMap(({ modifier, casterId }) =>
+    modifier.kind === "turnTempHp"
+      ? [
+          rollAmount(
+            modifier.amount,
+            deriveStats(context.state.actors[casterId] ?? actor, context),
+            context.dice,
+          ),
+        ]
+      : [],
+  );
+  const most = Math.max(0, ...gains);
+  return most > actor.tempHp && !isDead(actor)
+    ? [dndEvent(`${NS}:tempHpGained`, { actor: actor.id, amount: most })]
+    : [];
+}
+
+// Blink: a d6 as the bearer's turn ends, and on a 4 or more it's on the Ethereal Plane, shut away until its next turn.
+function blinkEvents(actor: Actor, context: Context): SystemEvent[] {
+  const blink = actor.activeEffects.find(
+    ({ modifier }) => modifier.kind === "blink",
+  );
+  if (!blink || isDown(actor) || context.dice.roll(6) < 4) return [];
+  return leafEvents(
+    [
+      {
+        kind: "modifier",
+        modifier: { kind: "sealed" },
+        duration: { until: "yourNextTurnStart" },
+      },
+    ],
+    `${blink.sourceId}:ethereal`,
+    actor,
+    actor,
+    context,
+  );
 }

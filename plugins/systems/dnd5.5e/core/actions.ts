@@ -475,10 +475,34 @@ function failChance(
 }
 
 // An ability check, in a fight or a scene. Help's Advantage on a check is used up by it.
+// The ability a check with this skill uses: another a feature allows, when it's better, as Primal Knowledge's
+// Strength in a Rage.
+function checkAbilityOf(
+  actor: Actor,
+  stats: Stats,
+  skill: Skill | undefined,
+  printed: Ability,
+): Ability {
+  if (skill === undefined) return printed;
+  return stats.passives.reduce<Ability>(
+    (best, passive) =>
+      passive.kind === "checkAbility" &&
+      passive.skills.includes(skill) &&
+      (!passive.while ||
+        actor.activeEffects.some(({ sourceId }) =>
+          passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+        )) &&
+      stats.abilities[passive.ability] > stats.abilities[best]
+        ? passive.ability
+        : best,
+    printed,
+  );
+}
+
 export function abilityCheck(
   actor: Actor,
   skill: Skill | undefined,
-  ability: Ability,
+  printed: Ability,
   dc: number,
   label: (success: boolean) => string,
   context: Context,
@@ -491,6 +515,7 @@ export function abilityCheck(
   events: SystemEvent[];
 } {
   const stats = deriveStats(actor, context);
+  const ability = checkAbilityOf(actor, stats, skill, printed);
   const befriended = familiarHelpUse(actor, stats, skill, context.state);
   const edge = {
     advantage:
@@ -975,6 +1000,12 @@ function bonusTacticCost(
   return cost;
 }
 
+// Uncertain Footing: a hampered creature can't take the Dash action.
+const canDash = (actor: Actor): boolean =>
+  !actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "actionLimit" && modifier.noDash,
+  );
+
 // Hunter's Rime: a creature Hunter's Mark marks can't take the Disengage action.
 function canDisengage(actor: Actor): boolean {
   return !actor.activeEffects.some(
@@ -1000,7 +1031,8 @@ function bonusTacticOptions(
   if (
     allowed.has("dash") &&
     extra > 0 &&
-    !hasCondition(actor, "grappled", "restrained")
+    !hasCondition(actor, "grappled", "restrained") &&
+    canDash(actor)
   ) {
     options.push({
       id: BONUS_DASH,
@@ -1222,7 +1254,11 @@ export function tacticOptions(
   const foes = standing(knownFoes(state, actor, access));
   const near = foes.filter((foe) => within5(actor, foe));
   const extra = walkSpeed(actor, stats) + dashBonus(stats);
-  if (extra > 0 && !hasCondition(actor, "grappled", "restrained")) {
+  if (
+    extra > 0 &&
+    !hasCondition(actor, "grappled", "restrained") &&
+    canDash(actor)
+  ) {
     options.push({
       id: DASH,
       label: `Dash (${String(extra)} ft more this turn)`,
@@ -1489,6 +1525,7 @@ export function runTactic(
   ): SystemEvent[] => {
     const { escape } = held;
     if (!escape) return [];
+    if (escape.free) return escapedEvents(freed, held);
     const rolled = abilityCheck(
       by,
       escape.skill,

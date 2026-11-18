@@ -93,7 +93,7 @@ export interface Move {
 // A lasting area on the map, as the board draws it: a cloud, an aura, light, or a wall's squares.
 export interface AreaView {
   readonly key: string; // the same area keeps its key as it moves
-  readonly kind: string; // darkness, fog, thorns, light, dim, sunlight, area, wall or image
+  readonly kind: string; // darkness, fog, thorns, light, dim, sunlight, area, wall, image or haze
   readonly x: number; // its centre square
   readonly y: number;
   readonly reach: number; // squares from the centre to its edge
@@ -101,6 +101,7 @@ export interface AreaView {
   readonly foe: boolean; // an enemy's, so a harmful area shows as a threat
   readonly blocks?: readonly string[]; // a wall's squares, as "x,y"
   readonly walls?: "walking" | "sight"; // what alone the wall stops, drawn as bars or as a curtain
+  readonly cells?: readonly string[]; // the squares of a ring or a line, as "x,y", drawn one by one
 }
 
 export interface BoardExtra {

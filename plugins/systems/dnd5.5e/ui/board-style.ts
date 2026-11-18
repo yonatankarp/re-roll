@@ -439,6 +439,10 @@ const BOARD_CSS = `
   border-style: dotted;
 }
 .dnd-area.image.foe { background: rgb(120 105 85 / 45%); border-color: rgb(200 185 160 / 45%); border-style: solid; }
+.dnd-area.haze {
+  background: repeating-linear-gradient(60deg, rgb(235 230 215 / 22%) 0 2px, transparent 2px 7px);
+  border-color: rgb(235 230 215 / 40%);
+}
 .dnd-area.wall {
   border-radius: 2px;
   border: 1px solid rgb(255 240 205 / 55%);

@@ -168,7 +168,12 @@ export function withEdge(
   const disadvantage =
     other.hostile === true &&
     about.includes("influence") &&
-    !stats.passives.some(({ kind }) => kind === "cunningSpeaker");
+    !stats.passives.some(
+      (passive) =>
+        passive.kind === "cunningSpeaker" &&
+        (!passive.skills ||
+          (skill !== undefined && passive.skills.includes(skill))),
+    );
   return { advantage, disadvantage };
 }
 
@@ -213,7 +218,9 @@ export function toolProficiencies(
       ...Object.keys(stats.classLevels).flatMap(
         (id) => lookup(access, ClassSchema, id).tools ?? [],
       ),
-      ...(background ? [toolByName(background.tool, access) ?? []].flat() : []),
+      ...(background?.tool
+        ? [toolByName(background.tool, access) ?? []].flat()
+        : []),
       ...stats.passives.flatMap((passive) =>
         passive.kind === "toolProficiency" ? passive.tools : [],
       ),

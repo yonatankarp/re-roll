@@ -1,3 +1,4 @@
+import { zoneModifiers } from "../zones.ts";
 import { z } from "zod";
 import { knownFoes } from "../fog.ts";
 import {
@@ -81,6 +82,7 @@ import {
 } from "./queries.ts";
 import {
   aimSquare,
+  alliesRiderEvents,
   leafEvents,
   payCosts,
   resolveAction,
@@ -187,9 +189,14 @@ export function deathSaveEvents(actor: Actor, context: Context): SystemEvent[] {
   {
     const stats = deriveStats(actor, context);
     const { natural } = rollD20(dice, {
-      advantage: stats.passives.some(
-        (passive) => passive.kind === "deathSaveAdvantage" && !passive.worse,
-      ),
+      advantage:
+        stats.passives.some(
+          (passive) => passive.kind === "deathSaveAdvantage" && !passive.worse,
+        ) ||
+        [
+          ...actor.activeEffects.map(({ modifier }) => modifier),
+          ...zoneModifiers(actor, context.state, context),
+        ].some((modifier) => modifier.kind === "deathSaveAdvantage"),
       disadvantage: stats.passives.some(
         (passive) => passive.kind === "deathSaveAdvantage" && passive.worse,
       ),
@@ -394,7 +401,11 @@ export function castAction(
   const aimed = picked
     ? picked.map((id) => actorOf(state, id))
     : (apart ?? resolveTargets(targetId, action, actor, context));
-  const caught = [...aimed, ...sharedWith(actor, action, aimed, context)];
+  // Sanctuary: a damaging spell aimed at a warded foe is lost on it unless the caster makes the save.
+  const sanctuary = sanctuarySaves(actor, action, aimed, context);
+  const kept = aimed.filter((item) => !sanctuary.lost.includes(item.id));
+  passedSaves.push(...sanctuary.events);
+  const caught = [...kept, ...sharedWith(actor, action, kept, context)];
   // A touch the familiar delivers spends its Reaction.
   const couriers = [
     ...new Set(
@@ -476,6 +487,14 @@ export function castAction(
             action.activation.alsoSelf,
             action.id,
             actor,
+            actor,
+            context,
+          )
+        : []),
+      ...(action.activation.alsoAllies
+        ? alliesRiderEvents(
+            action.activation.alsoAllies,
+            action.id,
             actor,
             context,
           )
@@ -939,4 +958,44 @@ function sharedWith(
       !isDown(item) &&
       distanceFeet(actor.position, item.position) <= share.within,
   );
+}
+
+// Sanctuary against a damaging spell aimed at creatures, not an area: the caster saves against each warded foe's ward,
+// and on a failure the spell is lost on that one.
+// shortcut: the caster doesn't pick a new target; the spell goes on at the others.
+function sanctuarySaves(
+  caster: Actor,
+  action: KnownAction,
+  targets: readonly Actor[],
+  context: Context,
+): { readonly lost: readonly string[]; readonly events: SystemEvent[] } {
+  const { targeting, resolution } = action.activation;
+  if (
+    action.spellLevel === null ||
+    !("creatures" in targeting) ||
+    resolution.kind === "attack" ||
+    resolution.damage.length === 0
+  ) {
+    return { lost: [], events: [] };
+  }
+  const lost: string[] = [];
+  const events: SystemEvent[] = [];
+  for (const target of targets) {
+    const ward = target.activeEffects.find(
+      ({ modifier }) => modifier.kind === "sanctuary" && !modifier.lasting,
+    );
+    if (ward?.modifier.kind !== "sanctuary" || target.side === caster.side) {
+      continue;
+    }
+    const save = rollSave(
+      caster,
+      ward.modifier.ability ?? "wis",
+      ward.modifier.dc ?? 10,
+      context,
+      true,
+    );
+    events.push(...save.events);
+    if (!save.saved) lost.push(target.id);
+  }
+  return { lost, events };
 }

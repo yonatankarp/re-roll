@@ -758,7 +758,7 @@ function restItems(members: readonly Actor[], context: Context): SystemEvent[] {
   );
 }
 
-// shortcut: Musician inspires every ally, not a number equal to the Proficiency Bonus.
+// Musician inspires up to its `count` of allies, those without Heroic Inspiration first.
 function restInspiration(
   members: readonly Actor[],
   rest: "short" | "long",
@@ -766,11 +766,23 @@ function restInspiration(
 ): SystemEvent[] {
   const inspired = new Set<string>();
   for (const actor of members) {
-    for (const passive of deriveStats(actor, context).passives) {
+    const stats = deriveStats(actor, context);
+    for (const passive of stats.passives) {
       if (passive.kind !== "restInspiration" || !passive.rests.includes(rest))
         continue;
       for (const other of passive.allies
-        ? members.filter((item) => item.id !== actor.id)
+        ? members
+            .filter((item) => item.id !== actor.id)
+            .sort(
+              (a, b) =>
+                Number(a.heroicInspiration) - Number(b.heroicInspiration),
+            )
+            .slice(
+              0,
+              passive.count
+                ? Math.max(1, evaluateFormula(passive.count, stats))
+                : Infinity,
+            )
         : [actor]) {
         inspired.add(other.id);
       }

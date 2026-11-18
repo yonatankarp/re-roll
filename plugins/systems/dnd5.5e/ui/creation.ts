@@ -197,15 +197,19 @@ export function backgroundChoice(
 ) {
   const background = find(access, BackgroundSchema, id);
   if (!background) return { id, label };
-  const feat = find(access, FeatSchema, background.feat);
+  const feat = background.feat
+    ? find(access, FeatSchema, background.feat)
+    : null;
+  // An older book's background lists all six abilities and names no feat.
+  const any = background.abilities.length === ABILITIES.length;
   return {
     id,
     label: background.name,
-    summary: `${abilityShort(background.abilities)} · ${feat?.name ?? "a feat"}`,
+    summary: `${any ? "Any abilities" : abilityShort(background.abilities)} · ${feat?.name ?? (background.feat ? "a feat" : "an Origin feat")}`,
     detail: [
-      `Abilities: ${background.abilities.map((ability) => ABILITY_NAMES[ability]).join(", ")}`,
+      `Abilities: ${any ? "any" : background.abilities.map((ability) => ABILITY_NAMES[ability]).join(", ")}`,
       `Skills: ${background.skills.map(skillName).join(", ")}`,
-      `Tool: ${background.tool}`,
+      ...(background.tool ? [`Tool: ${background.tool}`] : []),
       ...(feat
         ? [
             `${feat.name} (${(featInPlay(access, feat.id) ?? IN_PLAY.text).toLowerCase()}). ${feat.text}`,
