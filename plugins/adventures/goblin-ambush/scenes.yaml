@@ -1,6 +1,7 @@
 - id: road
   title: The Old Road
   text: Two dead horses block the trail, and the crows have not touched them.
+  art: assets/road.webp
   choices:
     - label: "[Perception] Check the treeline"
       check: { skill: perception, dc: 12 }
@@ -21,6 +22,10 @@
 - id: fight
   title: Ambush
   text: Arrows hiss out of the pines as more goblins rush the road.
+  textVariants:
+    - when: { kind: flag, flag: spotted-ambush }
+      text: You saw the goblins in the treeline before they loosed, and their arrows hiss past as they rush the road.
+  art: assets/fight.webp
   rest: false # no time to stop with goblins charging
   choices:
     - label: Drive them off
@@ -31,9 +36,11 @@
 - id: village
   title: Back to the Village
   text: The elder listens, then asks who will walk the road next.
+  art: assets/village.webp
 - id: camp
   title: Camp in the Pines
   text: With the goblins scattered, you make camp in the pines and tend your wounds. A peddler's mule is tethered by the fire.
+  art: assets/camp.webp
   choices:
     - label: Take an hour's rest and move on
       effects:
@@ -88,3 +95,4 @@
 - id: safe-road
   title: The Road Is Safe
   text: The road is quiet again, for now.
+  art: assets/safe-road.webp

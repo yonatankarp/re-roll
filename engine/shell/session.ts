@@ -37,6 +37,14 @@ import {
   sceneText,
 } from "../story/runtime.ts";
 import type { Adventure } from "../story/adventure.ts";
+import {
+  ART_INDEX,
+  ArtIndexSchema,
+  CREDITS,
+  CreditsSchema,
+  type FaceSchema,
+  creditLine,
+} from "../story/art.ts";
 import type { GameSystem, SystemSetting } from "../kernel/system.ts";
 import {
   type RunContext,
@@ -241,23 +249,6 @@ const SaveDetailsSchema = z.record(
   }),
 );
 type SaveDetails = z.infer<typeof SaveDetailsSchema>[string];
-const FaceSchema = z.object({
-  x: z.number(), // the face's centre, as a share of the picture's width
-  y: z.number(), // and of its height
-  size: z.number(), // the face's width, as a share of the picture's width
-});
-const ArtIndexSchema = z.array(
-  z.object({
-    file: z.string(),
-    monster: z.string().optional(),
-    subjects: z.array(z.string()).optional(), // other names it can stand for, such as "dwarf cleric"
-    face: FaceSchema.optional(),
-    cover: z.array(z.string()).optional(), // ids of the plugins (adventures or books) this picture is the cover of
-    chapter: z.array(z.string()).optional(), // "<adventure>:<scene>" for each chapter it opens
-    items: z.array(z.string()).optional(), // ids of the items it shows
-    treasure: z.array(z.string()).optional(), // kinds of treasure it shows, such as "coins"
-  }),
-);
 
 export interface TokenArt {
   readonly path: string;
@@ -605,6 +596,8 @@ export function createGame({
   let covers: ReadonlyMap<string, string> = new Map();
   let chapters: ReadonlyMap<string, string> = new Map(); // by "<adventure>:<scene>"
   let things: ReadonlyMap<string, string> = new Map(); // by item id or treasure kind
+  // Each bundled picture's or sound's source, by plugin id, for the About section.
+  let pluginCredits: ReadonlyMap<string, readonly string[]> = new Map();
   let glossaryText: Promise<string | null> | undefined; // read once, as the books don't change in play
   let rulingIndex:
     Promise<ReadonlyMap<string, readonly RulingRef[]>> | undefined; // likewise
@@ -648,22 +641,52 @@ export function createGame({
     const coverPaths = new Map<string, string>();
     const chapterPaths = new Map<string, string>();
     const thingPaths = new Map<string, string>();
+    const creditLines = new Map<string, readonly string[]>();
+    // The books' indexes, then each plugin's own, which only fill what no book pictures, so a shipped
+    // goblin token never shares the goblins with a book's.
+    const indexes: { folder: string; fill: boolean }[] = [];
     try {
-      const entries = await storage.list(ASSETS);
-      for (const { path } of entries) {
-        if (!/^books\/assets\/[^/]+\/index\.json$/.test(path)) continue;
-        const folder = path.slice(0, -"/index.json".length);
-        const parsed = ArtIndexSchema.safeParse(
-          JSON.parse((await storage.read(path)) ?? "null"),
+      for (const { path } of await storage.list(ASSETS)) {
+        if (/^books\/assets\/[^/]+\/index\.json$/.test(path))
+          indexes.push({
+            folder: path.slice(0, -"/index.json".length),
+            fill: false,
+          });
+      }
+    } catch {
+      // No books is the same as no book art.
+    }
+    try {
+      for (const [id, { root, files }] of (await scanPlugins(storage, roots))
+        .plugins) {
+        if (files.includes(ART_INDEX))
+          indexes.push({ folder: `${root}/assets`, fill: true });
+        if (!files.includes(CREDITS)) continue;
+        const credits = CreditsSchema.safeParse(
+          JSON.parse((await storage.read(`${root}/${CREDITS}`)) ?? "null"),
         );
+        creditLines.set(id, (credits.data ?? []).map(creditLine));
+      }
+    } catch {
+      // A plugin that can't be read loses only its pictures.
+    }
+    const booked = new Set<string>(); // token keys a book pictures
+    for (const { folder, fill } of indexes) {
+      try {
+        const parsed = ArtIndexSchema.safeParse(
+          JSON.parse((await storage.read(`${folder}/index.json`)) ?? "null"),
+        );
+        const put = (map: Map<string, string>, key: string, path: string) => {
+          if (!fill || !map.has(key)) map.set(key, path);
+        };
         for (const entry of parsed.data ?? []) {
           const { file, monster, subjects, face, cover } = entry;
           if (!BARE_NAME.test(file)) continue;
           const art = { path: `${folder}/${file}`, ...(face ? { face } : {}) };
           if (IMAGE_FILE.test(file)) {
-            for (const id of cover ?? []) coverPaths.set(id, art.path);
+            for (const id of cover ?? []) put(coverPaths, id, art.path);
             for (const key of entry.chapter ?? [])
-              chapterPaths.set(key, art.path);
+              put(chapterPaths, key, art.path);
             // The first picture found for a thing keeps it, so the books' order picks.
             for (const id of [
               ...(entry.items ?? []),
@@ -671,24 +694,29 @@ export function createGame({
             ])
               if (!thingPaths.has(id)) thingPaths.set(id, art.path);
           }
-          if (monster) found.set(artKey(monster), art.path);
+          // A book that shows the monster only alongside another still keeps its picture.
+          if (monster && !(fill && booked.has(artKey(monster))))
+            put(found, artKey(monster), art.path);
           for (const name of [
             ...(monster ? [monster] : []),
             ...(subjects ?? []),
           ]) {
             const key = artKey(name);
+            if (fill && booked.has(key)) continue;
+            if (!fill) booked.add(key);
             tokens.set(key, [...(tokens.get(key) ?? []), art]);
           }
         }
+      } catch {
+        // A damaged index loses only its own pictures.
       }
-    } catch {
-      // Nothing to show is the same as no art at all.
     }
     monsterArt = found;
     tokenArt = tokens;
     covers = coverPaths;
     chapters = chapterPaths;
     things = thingPaths;
+    pluginCredits = creditLines;
   };
   // The art is scanned once, and again when the plugins' files change.
   let artScan: Promise<void> | null = null;
@@ -1637,9 +1665,10 @@ export function createGame({
         ended: state.story.ended,
         playerDied: ui.playerDied(state.system),
         about: ui.about,
-        attributions: registry.plugins.flatMap(
-          (plugin) => plugin.attribution ?? [],
-        ),
+        attributions: registry.plugins.flatMap((plugin) => [
+          ...(plugin.attribution ? [plugin.attribution] : []),
+          ...(pluginCredits.get(plugin.id) ?? []),
+        ]),
         warnings,
       };
     },

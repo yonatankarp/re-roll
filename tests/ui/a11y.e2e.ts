@@ -103,7 +103,7 @@ test("the die waits as a focused button and the foe's plate has a way out", asyn
   await playUntil(page, () => page.locator(".dnd-cell").first().isVisible());
   await axe(page);
 
-  // A foe's plate shows only with a book's art, which CI lacks, so the page's own module draws one.
+  // The page's own module draws a foe's plate, so it opens with focus on a known button.
   const plateModule = `/@fs/${resolve(
     import.meta.dirname,
     "../../engine/shell/art-plate.ts",

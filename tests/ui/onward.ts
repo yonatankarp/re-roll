@@ -6,13 +6,21 @@ export async function playUntil(
   page: Page,
   ready: () => Promise<boolean>,
 ): Promise<void> {
+  // Alert asks to swap Initiative as a fight starts; until it's answered a map lights no squares.
   const onward = page
-    .getByRole("button", { name: /^(Carry on|Drive them off)$/ })
+    .getByRole("button", {
+      name: /^(Carry on|Drive them off|Keep your place)$/,
+    })
     .first();
+  // A foe's first sight lays its picture over the page; Escape puts it away, as a player would.
+  const plate = page.locator(".art-plate");
+  const fighting = page.locator(".dnd-token").first();
   await expect(async () => {
     if (await ready()) return;
-    if (await onward.isVisible()) await onward.click();
-    else await page.keyboard.press("Enter");
+    if (await plate.isVisible()) await page.keyboard.press("Escape");
+    else if (await onward.isVisible()) await onward.click();
+    // Once tokens stand on the board, Enter would act on it, so the foes' turns are waited out instead.
+    else if (!(await fighting.isVisible())) await page.keyboard.press("Enter");
     expect(await ready()).toBe(true);
   }).toPass({ intervals: [300], timeout: 30_000 });
 }
