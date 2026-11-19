@@ -233,20 +233,27 @@ export async function showStore(
 
   const heading = el("h2", { text: "Store" });
   heading.tabIndex = -1;
-  ctx.screen.replaceChildren(
-    el(
-      "section",
-      { class: "menu" },
-      heading,
-      ...(state.repos.length === 0
-        ? [
-            el("p", {
-              text: "No stores yet. A store is a GitHub repo that offers books and adventures to install. Add one below with the name its owner gave you, such as owner/repo.",
-            }),
-          ]
-        : sections),
-      add,
-    ),
+  const screen = el(
+    "section",
+    { class: "menu" },
+    heading,
+    ...(state.repos.length === 0
+      ? [
+          el("p", {
+            text: "No stores yet. A store is a GitHub repo that offers books and adventures to install. Add one below with the name its owner gave you, such as owner/repo.",
+          }),
+        ]
+      : sections),
+    add,
   );
+  ctx.screen.replaceChildren(screen);
+  ctx.keys = {
+    owner: screen,
+    handle: (event) => {
+      if (event.key !== "Escape") return false;
+      ctx.act(ctx.showMenu);
+      return true;
+    },
+  };
   ctx.focusNext = heading;
 }

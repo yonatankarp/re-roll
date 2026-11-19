@@ -124,7 +124,9 @@ export function withSaveFiles(
       path.startsWith(SAVES) ? saves.write(path, contents) : refuse(path),
     list: async (prefix) =>
       `${prefix}/`.startsWith(SAVES)
-        ? (await saves.list()).map((path) => ({ path, symlink: false }))
+        ? (await saves.list())
+            .filter((path) => path.startsWith(`${prefix}/`))
+            .map((path) => ({ path, symlink: false }))
         : content.list(prefix),
   };
 }

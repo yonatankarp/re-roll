@@ -1,5 +1,6 @@
+import { own } from "../kernel/own.ts";
 import { z } from "zod";
-import { STORY_FRAME_PREFIX } from "../story/runtime.ts";
+import { STORY_FRAME_SCHEMAS } from "../story/runtime.ts";
 import {
   type Decision,
   DecisionSchema,
@@ -7,6 +8,7 @@ import {
   type GameEvent,
   GameEventSchema,
   type GameState,
+  GameStateSchema,
   type Input,
   InputSchema,
   isNamespacedEvent,
@@ -55,7 +57,7 @@ export function migrate(
     };
   }
   while (version < target) {
-    const next = table[version];
+    const next = table[version]; // an integer, which never names a prototype key
     if (!next) {
       return { ok: false, error: `Unknown save format ${String(version)}` };
     }
@@ -183,21 +185,47 @@ export function loadSave(
   for (const { events } of log) {
     for (const event of events) {
       if (!isNamespacedEvent(event)) continue;
-      const schema = run.system.eventSchemas[event.kind];
+      const schema = own(run.system.eventSchemas, event.kind);
       if (!schema?.safeParse(event.payload).success) {
         return { ok: false, error: `Invalid event in save: ${event.kind}` };
       }
     }
   }
 
-  const state = foldEvents(run, log);
-  if (state === null) return { ok: false, error: "The save has no run start" };
-  if (!run.system.stateSchema.safeParse(state.system).success) {
-    return { ok: false, error: "The save's system state is invalid" };
+  const shape = checkLog(log);
+  if (shape) return { ok: false, error: shape };
+  // Events that each look right can still disagree, and the rules throw on those.
+  try {
+    const state = foldEvents(run, log);
+    if (state === null)
+      return { ok: false, error: "The save has no run start" };
+    if (!GameStateSchema.safeParse(state).success) {
+      return { ok: false, error: "The save's game state is invalid" };
+    }
+    if (!run.system.stateSchema.safeParse(state.system).success) {
+      return { ok: false, error: "The save's system state is invalid" };
+    }
+    const unresumable = checkResumable(run, state);
+    if (unresumable) return { ok: false, error: unresumable };
+    return { ok: true, save, state, warnings };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `The save is damaged: ${reason}` };
   }
-  const unresumable = checkResumable(run, state);
-  if (unresumable) return { ok: false, error: unresumable };
-  return { ok: true, save, state, warnings };
+}
+
+// A run starts once, first, and every input after the start answers a decision, as replayInputs plays them.
+function checkLog(log: readonly LogEntry[]): string | null {
+  const [first, ...rest] = log;
+  if (first?.input.kind !== "start" || first.events[0]?.kind !== "runStarted")
+    return "The save has no run start";
+  const starts = log.flatMap(({ events }) =>
+    events.filter((event) => event.kind === "runStarted"),
+  );
+  if (starts.length > 1) return "The save starts its run more than once";
+  if (rest.some(({ input }) => input.kind !== "answer"))
+    return "The save starts its run more than once";
+  return null;
 }
 
 // A frame the rules no longer know, or whose payload changed shape, would only fail on the
@@ -218,8 +246,12 @@ function checkFrame(run: RunContext, frame: Frame): string | null {
       ? checkFrame(run, replay.data.frame)
       : "The save waits on an answer to a step that can't be read";
   }
-  if (frame.kind.startsWith(STORY_FRAME_PREFIX)) return null; // the engine's own
-  const definition = run.system.frames[frame.kind];
+  const story = own(STORY_FRAME_SCHEMAS, frame.kind); // the engine's own
+  if (story)
+    return story.safeParse(frame.payload).success
+      ? null
+      : `The save's step ${frame.kind} can't be read`;
+  const definition = own(run.system.frames, frame.kind);
   if (!definition)
     return `The save is in the middle of an unknown step, ${frame.kind}`;
   if (

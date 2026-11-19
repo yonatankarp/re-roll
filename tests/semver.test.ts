@@ -14,6 +14,11 @@ describe("satisfiesCaret", () => {
     ["0.2.5", "^0.2", true],
     ["0.3.0", "^0.2", false],
     ["0.3.0", "^0", true],
+    ["0.0.3", "^0.0.3", true],
+    ["0.0.4", "^0.0.3", false],
+    ["0.0.2", "^0.0.3", false],
+    ["0.0.9", "^0.0", true],
+    ["0.1.0", "^0.0", false],
     ["1.0", "^1", false],
     ["1.0.0", ">=1", false],
   ])("%s against %s is %s", (version, range, expected) => {
