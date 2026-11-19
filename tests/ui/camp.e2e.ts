@@ -70,7 +70,10 @@ test("levels up, buys at the camp's shop, rests and keeps it all over a reload",
   // A fresh page carries on from the autosave: the dagger bought, the purse spent, the rest taken.
   await page.reload();
   await page.getByRole("button", { name: /^Continue / }).click();
-  await expect(page.locator(".hud")).toContainText("14/14");
+  // Opening the adventure afresh reads its rules again, which a busy runner takes a while over.
+  await expect(page.locator(".hud")).toContainText("14/14", {
+    timeout: 20_000,
+  });
   await expect(rest).toHaveAttribute("aria-disabled", "true");
   await page
     .getByRole("button", { name: "Trade with Tam the peddler" })

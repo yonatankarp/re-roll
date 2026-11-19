@@ -98,6 +98,7 @@ async function headless(page: Page, folder: string): Promise<string[]> {
 }
 
 test("the page and headless play offer the same choices", async ({ page }) => {
+  test.setTimeout(120_000); // plays the fight twice, on the page and headless, and the road's map is slow on WebKit's runner
   const folder = await mkdtemp(join(tmpdir(), "re-roll-agree-"));
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
