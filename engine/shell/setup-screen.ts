@@ -39,6 +39,7 @@ export async function showSetup(
           chosen[setting.id] = option.id;
           for (const other of cards) {
             other.setAttribute("aria-checked", String(other === card));
+            other.tabIndex = other === card ? 0 : -1;
           }
         });
         card.className = "setting-card";
@@ -47,13 +48,30 @@ export async function showSetup(
           "aria-checked",
           String(option.id === setting.default),
         );
-        card.append(
-          el("strong", { text: option.label }),
-          el("span", { text: option.detail }),
-        );
+        // One tab stop for the group, on the chosen card; arrows move the choice, as radios do.
+        card.tabIndex = option.id === setting.default ? 0 : -1;
+        const detail = el("span", { text: option.detail });
+        detail.id = `setting-${setting.id}-${option.id}`;
+        card.setAttribute("aria-label", option.label);
+        card.setAttribute("aria-describedby", detail.id);
+        card.append(el("strong", { text: option.label }), detail);
         return card;
       });
       const group = el("div", { class: "setting-cards" }, ...cards);
+      group.addEventListener("keydown", (event) => {
+        const step = {
+          ArrowRight: 1,
+          ArrowDown: 1,
+          ArrowLeft: -1,
+          ArrowUp: -1,
+        }[event.key];
+        const at = cards.indexOf(event.target as HTMLButtonElement);
+        if (step === undefined || at < 0) return;
+        event.preventDefault();
+        const next = cards[(at + step + cards.length) % cards.length];
+        next?.focus();
+        next?.click();
+      });
       group.setAttribute("role", "radiogroup");
       group.setAttribute("aria-label", setting.label);
       return el(
@@ -74,10 +92,11 @@ export async function showSetup(
     card.className = "setting-card";
     card.setAttribute("role", "switch");
     card.setAttribute("aria-checked", String(setting.default === on?.id));
-    card.append(
-      el("strong", { text: setting.label }),
-      el("span", { text: on?.detail ?? "" }),
-    );
+    const detail = el("span", { text: on?.detail ?? "" });
+    detail.id = `setting-${setting.id}`;
+    card.setAttribute("aria-label", setting.label);
+    card.setAttribute("aria-describedby", detail.id);
+    card.append(el("strong", { text: setting.label }), detail);
     return card;
   });
   const drawer = el(

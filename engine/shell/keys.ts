@@ -6,6 +6,15 @@ export const MOD = MAC ? "⌘" : "Ctrl+";
 export const keyshortcuts = (key: string): string =>
   `Control+${key} Meta+${key}`;
 
+// The letter a shortcut means: the one the layout types, or, on a layout without Latin letters (Hebrew,
+// Cyrillic, Greek), the key in that place on a US keyboard, so Ctrl+S still saves.
+export const letterOf = (event: KeyboardEvent): string => {
+  const key = event.key.toLowerCase();
+  return /^[a-z]$/.test(key)
+    ? key
+    : (/^Key([A-Z])$/.exec(event.code)?.[1]?.toLowerCase() ?? key);
+};
+
 export function wireKeys(ctx: ShellContext): void {
   // Esc puts an error away first, before it means Back.
   document.addEventListener("keydown", (event) => {
@@ -47,8 +56,12 @@ export function wireKeys(ctx: ShellContext): void {
   // Number keys pick the story's numbered choices, as a reader turns to an entry. Never in a fight,
   // in a text field, with a drawer open or while the choices are held back.
   document.addEventListener("keydown", (event) => {
-    const index = Number(event.key) - 1;
-    if (!/^[1-9]$/.test(event.key) || event.repeat) return;
+    // By the key's place too, as AZERTY's top row types &é" unshifted.
+    const digit = /^[1-9]$/.test(event.key)
+      ? event.key
+      : /^Digit([1-9])$/.exec(event.code)?.[1];
+    if (!digit || event.repeat) return;
+    const index = Number(digit) - 1;
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
       return;
     if ((event.target as Element).closest("input, textarea, select")) return;

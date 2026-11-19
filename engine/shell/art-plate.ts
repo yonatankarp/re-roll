@@ -1,5 +1,5 @@
 import { type Game } from "./session.ts";
-import { el, enter, picture } from "./dom.ts";
+import { button, el, enter, picture } from "./dom.ts";
 
 // A book's full picture laid over the page for a moment, as turning to a plate: a foe met for the first
 // time, or a chapter's title page. Only the page shows it, so nothing reaches the log and saves stay
@@ -22,11 +22,30 @@ export interface ArtPlate {
   readonly close: () => void;
 }
 
+// The plate's way out, a real button so a screen reader finds it, though it never takes focus itself.
+function hint(): HTMLButtonElement {
+  const node = button("Continue", () => undefined); // the plate's own click closes it
+  node.className = "plate-hint";
+  node.setAttribute("aria-keyshortcuts", "Escape");
+  const key = el("kbd", { text: "Esc" });
+  key.setAttribute("aria-hidden", "true");
+  node.append(" ", key);
+  return node;
+}
+
 export function artPlate(): ArtPlate {
   const element = el("section", { class: "art-plate" });
   element.hidden = true;
   element.setAttribute("role", "status"); // read out as it appears
+  let back: Element | null = null; // what had focus as the plate showed, for its Continue button
   const close = (): void => {
+    if (
+      element.contains(document.activeElement) &&
+      back instanceof HTMLElement &&
+      back.isConnected
+    ) {
+      back.focus({ preventScroll: true });
+    }
     element.hidden = true;
     element.replaceChildren();
     document.removeEventListener("keydown", onKey, true);
@@ -58,10 +77,11 @@ export function artPlate(): ArtPlate {
             {},
             el("span", { class: "plate-kicker", text: kicker }),
             el("strong", { class: "plate-title", text: title }),
-            el("span", { class: "plate-hint", text: "Click to continue" }),
+            hint(),
           ),
         ),
       );
+      back = document.activeElement;
       element.hidden = false;
       enter(element);
       document.addEventListener("keydown", onKey, true);

@@ -109,7 +109,7 @@
       transparent 55%
     ),
     radial-gradient(circle at 60% 40%, rgb(255 255 255 / 25%), transparent 40%);
-  font: 17px/1.5 var(--font-body);
+  font: 106.25%/1.5 var(--font-body); /* 17px at the usual default; the text size scales it */
 }
 
 /* A dim dungeon, with parchment-coloured ink and gold headings. */
@@ -283,6 +283,38 @@ button:hover {
   outline: none;
 }
 
+/* Read out, not shown. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.bar-end,
+.text-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bar-end {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.text-size button {
+  padding: 4px 8px;
+  font-size: 0.9rem;
+}
+
+.text-size button[aria-disabled="true"] {
+  opacity: 0.5;
+}
+
 .bar-actions button {
   padding: 6px 12px;
   font-size: 0.9rem;
@@ -317,7 +349,9 @@ button:hover {
 
 /* A focused option must not end up hidden under the sticky header. */
 html {
-  scroll-padding-top: 88px;
+  scroll-padding-top: calc(
+    var(--bar-height, 5.2rem) + 8px
+  ); /* set from the bar, which grows with the text and wraps */
 }
 
 .scene-text {
@@ -628,7 +662,7 @@ summary {
 
 .box-label {
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: 0.75rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
@@ -862,7 +896,7 @@ summary {
 
 .hud-stat small {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   letter-spacing: 0.05em;
 }
 
@@ -1303,8 +1337,12 @@ summary {
 
 .plate-hint {
   margin-top: 4px;
+  padding: 2px 8px;
+  border: 0;
+  background: none;
   font: 0.85rem var(--font-ui);
   color: var(--muted);
+  cursor: pointer;
 }
 
 .art-plate.enter {

@@ -38,6 +38,11 @@ export function drawSheets(
         ),
       ),
       ...(down ? [el("span", { class: "hud-down", text: down })] : []),
+      // Its words name the button, so voice control matches them; this says what it does.
+      el("span", {
+        class: "visually-hidden",
+        text: ", open the character sheet",
+      }),
     );
   };
   const shownHud = ++page.hudShown;
