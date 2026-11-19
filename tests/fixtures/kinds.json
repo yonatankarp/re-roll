@@ -398,6 +398,7 @@
       "order",
       "positions?",
       "secondTurns?",
+      "standOffWins?",
       "sunlight?",
       "surprised?",
       "terrain?",

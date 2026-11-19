@@ -19,6 +19,7 @@ export interface Token {
   readonly disc: HTMLElement;
   readonly tip: HTMLElement; // the name, HP and conditions, shown on hover or under the cursor
   readonly shield: HTMLElement; // the cover it has against the player, shown on hover while the player can attack it
+  readonly badges: HTMLElement; // a small badge for each condition
   readonly name: string;
   notes: readonly string[]; // status and conditions
   side: string;

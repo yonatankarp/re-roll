@@ -94,6 +94,51 @@ export function setTip(token: Token): void {
   );
 }
 
+// Two letters tell the conditions apart: P alone could be poisoned, prone, paralyzed or petrified.
+const BADGE_LETTERS: ReadonlyMap<string, string> = new Map([
+  ["invisible", "Iv"],
+]);
+
+// One badge per condition, drawn as inline SVG with presentation attributes, since Tauri's CSP blocks
+// inline styles. The token's tooltip names them, and each badge carries its name as its label.
+export function setBadges(token: Token, conditions: readonly string[]): void {
+  const SVG = "http://www.w3.org/2000/svg";
+  token.badges.replaceChildren(
+    ...conditions.map((condition) => {
+      const label = condition.charAt(0).toUpperCase() + condition.slice(1);
+      const badge = document.createElementNS(SVG, "svg");
+      badge.setAttribute("viewBox", "0 0 16 16");
+      badge.setAttribute("role", "img");
+      badge.setAttribute("aria-label", label);
+      const title = document.createElementNS(SVG, "title");
+      title.textContent = label;
+      const circle = document.createElementNS(SVG, "circle");
+      for (const [name, value] of Object.entries({
+        cx: "8",
+        cy: "8",
+        r: "7",
+        fill: "#3a120c",
+        stroke: "#ece3cf",
+        "stroke-width": "1.5",
+      }))
+        circle.setAttribute(name, value);
+      const letter = document.createElementNS(SVG, "text");
+      for (const [name, value] of Object.entries({
+        x: "8",
+        y: "11.5",
+        "text-anchor": "middle",
+        "font-size": "8",
+        "font-weight": "bold",
+        fill: "#ece3cf",
+      }))
+        letter.setAttribute(name, value);
+      letter.textContent = BADGE_LETTERS.get(condition) ?? label.slice(0, 2);
+      badge.append(title, circle, letter);
+      return badge;
+    }),
+  );
+}
+
 // HP shows as a ring round the disc that empties as the creature is hurt.
 export function setHp(token: Token, hp: number): void {
   token.hp = hp;
@@ -146,8 +191,16 @@ export function tokenFor(ctx: BoardContext, actor: Combatant & Vitals): Token {
   tip.dataset.terms = ""; // the shell explains a condition named here
   const shield = el("span", "dnd-shield");
   shield.hidden = true;
+  const badges = el("span", "dnd-badges");
   const node = el("div", "dnd-token");
-  node.append(el("span", "dnd-ring"), disc, el("span", "dnd-foe"), tip, shield);
+  node.append(
+    el("span", "dnd-ring"),
+    disc,
+    el("span", "dnd-foe"),
+    badges,
+    tip,
+    shield,
+  );
   node.dataset.side = sideOf(actor);
   node.dataset.id = actor.id;
   ctx.field.append(node);
@@ -156,6 +209,7 @@ export function tokenFor(ctx: BoardContext, actor: Combatant & Vitals): Token {
     disc,
     tip,
     shield,
+    badges,
     name: actor.name,
     notes: [],
     side: sideOf(actor),

@@ -425,8 +425,20 @@ function runApplyEffects(
       );
       if (!encounter) throw new Error(`Unknown encounter ${effect.encounter}`);
       const outcomes = own(run.adventure.encounterOutcomes, encounter.id);
+      const { scene } = state.story;
+      // The default retreat only when the scene still offers a choice: one whose every choice
+      // the fight's own choice has closed (a "tried it" flag) would leave the party at a dead end.
+      const canFlee =
+        outcomes?.onFlee !== undefined ||
+        (scene !== null &&
+          findScene(run, scene).choices.some((choice) =>
+            evaluateCondition(choice.when, run, state),
+          ));
       const result = run.system.startEncounter(encounter, context, {
-        canFlee: outcomes?.onFlee !== undefined,
+        canFlee,
+        ...(canFlee && outcomes?.onFlee === undefined
+          ? { standOffWins: true }
+          : {}),
         defeatContinues: outcomes?.onDefeat !== undefined,
       });
       assertOwnEvents(run, result.events);
@@ -434,7 +446,7 @@ function runApplyEffects(
         events: result.events ?? [],
         frames: [
           ...(result.frames ?? []),
-          ...(outcomes
+          ...(outcomes || canFlee
             ? [
                 {
                   kind: "story:afterEncounter",
@@ -511,7 +523,18 @@ function runAfterEncounter(
     case "defeat":
       return { frames: [effectsFrame(outcomes?.onDefeat ?? [])] };
     case "flee":
-      return { frames: [effectsFrame(outcomes?.onFlee ?? [])] };
+      return {
+        // Without onFlee, back into the scene the fight began in. An earlier scene could lead on
+        // along paths that assume a win.
+        frames: [
+          effectsFrame(
+            outcomes?.onFlee ??
+              (state.story.scene === null
+                ? []
+                : [{ kind: "goto", scene: state.story.scene }]),
+          ),
+        ],
+      };
     default:
       return {
         frames: [effectsFrame([...effects, ...(outcomes?.onVictory ?? [])])],

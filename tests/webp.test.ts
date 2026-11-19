@@ -10,7 +10,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
-import { convertBooks, rebase, unionCrop } from "../engine/tools/webp.ts";
+import {
+  MAX_SIDE,
+  convertBooks,
+  rebase,
+  unionCrop,
+} from "../engine/tools/webp.ts";
 
 describe("unionCrop and rebase", () => {
   it("frames every crop and measures each from the union's corner", () => {
@@ -94,11 +99,46 @@ describe("convertBooks", () => {
       await readFile(join(dir, "assets/book/index.json"), "utf8"),
     ).toContain('"face.webp"');
 
+    expect(report.shrunk).toEqual([]);
+
     const again = await convertBooks(dir);
     expect(again.converted).toBe(0);
     expect(again.cropped).toEqual([]);
     expect(await readFile(join(adventure, "encounters.yaml"), "utf8")).toBe(
       encounters,
     );
+  });
+
+  it("shrinks a picture over MAX_SIDE and its index size, but never a battle map's image", async () => {
+    dir = await mkdtemp(join(tmpdir(), "webp-"));
+    const adventure = join(dir, "adventures/a");
+    await mkdir(join(adventure, "assets"), { recursive: true });
+    await mkdir(join(dir, "assets/book"), { recursive: true });
+    await writeFile(join(adventure, "plugin.yaml"), "id: a\n");
+    await picture(MAX_SIDE + 904, 100, join(dir, "assets/book/wide.png"));
+    await picture(MAX_SIDE + 4, 100, join(adventure, "assets/map.png"));
+    await writeFile(
+      join(dir, "assets/book/index.json"),
+      JSON.stringify(
+        [{ file: "wide.png", page: 1, width: MAX_SIDE + 904, height: 100 }],
+        null,
+        1,
+      ),
+    );
+    await writeFile(
+      join(adventure, "encounters.yaml"),
+      `- id: x\n  battlemap:\n    image: assets/map.png\n    imageWidth: ${String(MAX_SIDE + 4)}\n    imageHeight: 100\n    crop: { x: 0, y: 0, width: ${String(MAX_SIDE + 4)}, height: 100 }\n    columns: 2\n`,
+    );
+
+    const report = await convertBooks(dir);
+    expect(report.shrunk).toEqual(["assets/book/wide.webp"]);
+    const wide = await sharp(join(dir, "assets/book/wide.webp")).metadata();
+    expect([wide.width, wide.height]).toEqual([MAX_SIDE, 82]);
+    expect(
+      JSON.parse(await readFile(join(dir, "assets/book/index.json"), "utf8")),
+    ).toEqual([{ file: "wide.webp", page: 1, width: MAX_SIDE, height: 82 }]);
+    const map = await sharp(join(adventure, "assets/map.webp")).metadata();
+    expect(map.width).toBe(MAX_SIDE + 4);
+    expect((await convertBooks(dir)).shrunk).toEqual([]);
   });
 });
