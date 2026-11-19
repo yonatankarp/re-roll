@@ -89,7 +89,7 @@ npm run test:ui     # Playwright tests of the built game under the app's CSP, in
 - `npm run bot -- [runs] [adventure] [--smart] [--difficulty=story|normal|hard]` plays an adventure many times to find dead ends and measure balance.
 - `npm run check-pack` checks every plugin's content.
 - `npm run import` turns your saved book pages into plugins under `books/`. Its subcommands are `parse`, `library`, `extract`, `split`, `draft` and `approve`, and section 11 of the design doc explains them.
-- `npm run narrate -- <adventure>` reads a `books/` adventure's scenes aloud once, with `ffmpeg` on your `PATH`, and keeps the clips beside it. Scenes without a clip are read in the app as they play.
+- `npm run narrate -- <adventure>` reads an adventure's scenes aloud once, with `ffmpeg` on your `PATH`, and keeps the clips beside it. Scenes without a clip are read in the app as they play.
 
 ### Making a store
 

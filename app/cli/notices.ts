@@ -249,13 +249,14 @@ Re-roll is licensed under the GNU General Public License, version 3 or later (se
 - **eSpeak NG** (GPL-3.0-or-later), compiled into the narration worker through the \`phonemizer\` package, to turn text into phonemes for the narrator. Source: https://github.com/espeak-ng/espeak-ng
 - **Kokoro-82M** voice model and voices (Apache-2.0), downloaded on first use and verified by hash. Source: https://huggingface.co/hexgrad/Kokoro-82M
 - **Solbera's D&D 5e fonts** (CC BY-SA 4.0): Bookinsanity, Mr Eaves Small Caps, Nodesto Caps Condensed, Scaly Sans and Scaly Sans Caps, unchanged from ${fonts.source}. Their licence is below.
+- **Art in the shipped adventures**: public-domain paintings from Wikimedia Commons, and icons by Lorc and Delapouite from game-icons.net (CC BY 3.0), resized or drawn onto tokens and a map. Each file is listed under Music, sounds and art below, and a game's About credits its own.
 - **Music and sounds**: Kevin MacLeod's music from incompetech.com (CC BY 4.0) and Kenney's audio packs from kenney.nl (CC0 1.0), trimmed and re-encoded. Each file is listed under Music, sounds and art below, and the game's About credits them.
 - **System Reference Document 5.2** (CC BY 4.0) by Wizards of the Coast, the basis of \`plugins/rules/srd52\` and the shipped adventures' rules. See the attribution in that plugin.
 - **glib 0.18.5** (MIT) in \`app/desktop/src-tauri/patches/glib-0.18.5\`, with the GHSA-wrw7-89jp-8q8g fix from glib 0.20 backported, because Tauri's Linux GTK stack still pins glib 0.18.
 
 ## Music, sounds and art
 
-Each file's credit, from the \`credits.json\` beside it (${creditFiles.map((file) => `\`${file}\``).join(", ")}). CC0 1.0 is at https://creativecommons.org/publicdomain/zero/1.0/, CC BY 3.0 at https://creativecommons.org/licenses/by/3.0/ and CC BY 4.0 at https://creativecommons.org/licenses/by/4.0/.
+Each file's credit, from the \`credits.json\` beside it (${creditFiles.map((file) => `\`${file}\``).join(", ")}). CC0 1.0 is at https://creativecommons.org/publicdomain/zero/1.0/, CC BY 3.0 at https://creativecommons.org/licenses/by/3.0/ and CC BY 4.0 at https://creativecommons.org/licenses/by/4.0/, and PD is the public domain.
 
 ${mediaTable}
 

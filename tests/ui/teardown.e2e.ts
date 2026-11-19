@@ -6,9 +6,9 @@ import { playUntil } from "./onward.ts";
 
 // Into the first fight of the shipped adventure, on the fighter's own turn.
 async function intoFight(page: Page): Promise<void> {
-  // A monster's first sight covers the page with its picture until a click, as a player would dismiss it.
-  await page.addLocatorHandler(page.locator(".art-plate"), (plate) =>
-    plate.click(),
+  // A monster's first sight covers the page with its picture; Escape puts it away, as a player would.
+  await page.addLocatorHandler(page.locator(".art-plate"), () =>
+    page.keyboard.press("Escape"),
   );
   await page.goto("/");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();

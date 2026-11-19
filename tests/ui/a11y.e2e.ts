@@ -130,8 +130,22 @@ test("the die waits as a focused button and the foe's plate has a way out", asyn
     .not.toBe("BODY");
 
   // The goblins' plate as the fight starts: a named way out, which gives focus back.
-  const plate = page.getByRole("status").filter({ hasText: "A foe appears" });
-  await playUntil(page, () => plate.isVisible());
+  const plate = page
+    .getByRole("status")
+    .filter({ hasText: /^(A foe appears|Foes appear)/ });
+  // Not playUntil: an Enter as the plate comes would press its Continue. A waiting die holds focus.
+  const onward = page
+    .getByRole("button", {
+      name: /^(Carry on|Drive them off|Keep your place)$/,
+    })
+    .first();
+  const waiting = page.getByRole("button", { name: /^Throw the d20/ }).first();
+  await expect(async () => {
+    if (await plate.isVisible()) return;
+    if (await onward.isVisible()) await onward.click();
+    else if (await waiting.isVisible()) await page.keyboard.press("Enter");
+    expect(await plate.isVisible()).toBe(true);
+  }).toPass({ intervals: [300], timeout: 30_000 });
   const leave = plate.getByRole("button", { name: /^Continue/ });
   await expect(leave).toHaveAttribute("aria-keyshortcuts", "Escape");
   await expect(plate).toContainText("Esc");

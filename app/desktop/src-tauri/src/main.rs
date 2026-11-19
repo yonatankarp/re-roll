@@ -204,8 +204,8 @@ const PART_FILE_TYPES: [(&str, &[&str]); 5] = [
     ("library", &["md", "json"]),
 ];
 // The loader's ALLOWED_EXTENSIONS in engine/run/loader.ts.
-const PLUGIN_FILE_TYPES: [&str; 10] = [
-    "yaml", "md", "txt", "png", "jpg", "jpeg", "webp", "mp3", "ogg", "wav",
+const PLUGIN_FILE_TYPES: [&str; 11] = [
+    "yaml", "md", "txt", "png", "jpg", "jpeg", "webp", "mp3", "ogg", "wav", "json",
 ];
 const SHARED_FILES: [&str; 1] = ["library/glossary.json"];
 
@@ -656,6 +656,7 @@ mod tests {
         assert!(is_part_file("rules", "monsters/goblin.yaml"));
         assert!(is_part_file("adventures", "art/Scene 1.PNG"));
         assert!(is_part_file("assets", "index.json"));
+        assert!(is_part_file("adventures", "assets/credits.json"));
         assert!(is_part_file("library", "0001-introduction.md"));
         for (folder, path) in [
             ("adventures", ""),
@@ -673,7 +674,7 @@ mod tests {
             ("adventures", "yaml"),
             ("adventures", "a/.yaml"),
             ("adventures", "plugin"),
-            ("adventures", "data.json"),
+            ("adventures", "data.html"),
             ("assets", "notes.md"),
             ("library", "cover.webp"),
             ("sources", "book.md"),
