@@ -1,0 +1,74 @@
+[
+  {
+    "file": "music-explore.ogg",
+    "title": "Suonatore di Liuto",
+    "author": "Kevin MacLeod (incompetech.com)",
+    "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1400023",
+    "licence": "CC-BY-4.0",
+    "changes": "the first 100 seconds, loudness-normalised and faded in and out, re-encoded to Opus, with an AAC copy"
+  },
+  {
+    "file": "music-tension.ogg",
+    "title": "Gathering Darkness",
+    "author": "Kevin MacLeod (incompetech.com)",
+    "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100849",
+    "licence": "CC-BY-4.0",
+    "changes": "the first 100 seconds, loudness-normalised and faded in and out, re-encoded to Opus, with an AAC copy"
+  },
+  {
+    "file": "music-combat.ogg",
+    "title": "Five Armies",
+    "author": "Kevin MacLeod (incompetech.com)",
+    "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100875",
+    "licence": "CC-BY-4.0",
+    "changes": "the first 100 seconds, loudness-normalised and faded in and out, re-encoded to Opus, with an AAC copy"
+  },
+  {
+    "file": "level-up.ogg",
+    "title": "jingles_PIZZI02 from Music Jingles",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/music-jingles",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "victory.ogg",
+    "title": "jingles_PIZZI12 from Music Jingles",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/music-jingles",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "defeat.ogg",
+    "title": "jingles_PIZZI01 from Music Jingles",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/music-jingles",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "rest.ogg",
+    "title": "jingles_PIZZI13 from Music Jingles",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/music-jingles",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "shop.ogg",
+    "title": "handleCoins2 from RPG Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "page.ogg",
+    "title": "bookFlip2 from RPG Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  }
+]

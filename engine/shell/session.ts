@@ -23,7 +23,11 @@ import {
   loadSave,
 } from "../run/save.ts";
 import type { Storage } from "../kernel/storage.ts";
-import { type Ambience, sceneAmbience } from "../story/ambience.ts";
+import {
+  type Ambience,
+  placeAmbience,
+  sceneAmbience,
+} from "../story/ambience.ts";
 import { scenesAhead } from "../story/narration.ts";
 import {
   REST_OPTION_PREFIX,
@@ -353,7 +357,7 @@ function agoText(savedAt: string, now: number): string | null {
   const seconds = Math.max(0, (now - Date.parse(savedAt)) / 1000);
   if (Number.isNaN(seconds) || seconds >= 7 * 86400) return null;
   if (seconds < 60) return "just now";
-  const format = new Intl.RelativeTimeFormat(undefined, { style: "short" });
+  const format = new Intl.RelativeTimeFormat("en", { style: "short" }); // English, as "just now" is
   if (seconds < 3600) return format.format(-Math.floor(seconds / 60), "minute");
   if (seconds < 86400)
     return format.format(-Math.floor(seconds / 3600), "hour");
@@ -993,7 +997,7 @@ export function createGame({
         }
         const savedAt = await savedAtOf(path);
         const when = savedAt
-          ? new Date(savedAt).toLocaleString(undefined, {
+          ? new Date(savedAt).toLocaleString("en", {
               dateStyle: "medium",
               timeStyle: "short",
             })
@@ -1573,7 +1577,13 @@ export function createGame({
         title: run.adventure.title,
         scene: text,
         sceneTitle: currentScene ? sceneTitle(currentScene) : null,
-        ambience: sceneAmbience(currentScene?.ambience, text ?? ""),
+        ambience: sceneAmbience(
+          currentScene?.ambience,
+          text ?? "",
+          currentScene
+            ? placeAmbience(run.adventure).get(currentScene.id)
+            : undefined,
+        ),
         upcoming: scenesAhead(currentScene).flatMap((id) => {
           const next = run.adventure.scenes.find((item) => item.id === id);
           return next ? [sceneText(run, state, next)] : [];

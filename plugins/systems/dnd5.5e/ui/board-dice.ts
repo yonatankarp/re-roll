@@ -26,14 +26,44 @@ function solid(): Promise<Dice3d | null> {
 // A d20 drawn flat: an outline, its top face and the edges that meet there.
 const D20 = `<svg viewBox="0 0 100 100" aria-hidden="true"><polygon class="d20-body" points="50,3 93,27 93,73 50,97 7,73 7,27"/><polygon class="d20-face" points="50,22 76,66 24,66"/><path class="d20-edge" d="M50,3 50,22 M93,27 76,66 M93,73 76,66 M50,97 50,66 M7,73 24,66 M7,27 24,66 M50,22 93,27 M50,22 7,27 M24,66 50,97 76,66"/></svg>`;
 
-function waitForThrow(ctx: BoardContext, prompt: HTMLElement): Promise<void> {
+// The player's die waits as a button with focus, so the keys and a screen reader find it wherever focus
+// was; the throw gives focus back.
+function waitForThrow(
+  ctx: BoardContext,
+  prompt: HTMLElement,
+  what: string,
+): Promise<void> {
   return fast(ctx)
     ? Promise.resolve()
     : new Promise((resolve) => {
+        const back =
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
         prompt.classList.add("waiting");
+        prompt.setAttribute("role", "button");
+        prompt.setAttribute("aria-label", `Throw the d20: ${what}`);
+        prompt.tabIndex = 0;
+        const onKey = (event: KeyboardEvent): void => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          event.stopPropagation();
+          ctx.throwNow?.();
+        };
+        prompt.addEventListener("keydown", onKey);
+        prompt.focus({ preventScroll: true });
         ctx.board.classList.add("awaiting");
         ctx.throwNow = () => {
           ctx.throwNow = null;
+          prompt.removeEventListener("keydown", onKey);
+          // Back where it was; else nowhere, so the page gives focus to the choices once they come back.
+          if (document.activeElement === prompt) {
+            if (back?.isConnected) back.focus({ preventScroll: true });
+            if (document.activeElement === prompt) prompt.blur();
+          }
+          prompt.removeAttribute("role");
+          prompt.removeAttribute("aria-label");
+          prompt.removeAttribute("tabindex");
           prompt.classList.remove("waiting");
           ctx.board.classList.remove("awaiting");
           if (ctx.host.sound?.() === true) diceSound();
@@ -72,7 +102,7 @@ export async function throwD20(
   const label = el(
     "small",
     "dnd-throw-note",
-    mine ? `${before}: click or press Return` : "",
+    mine ? `${before}: click, or press Enter` : "",
   );
   die.append(label);
   ctx.board.append(die);
@@ -88,7 +118,7 @@ export async function throwD20(
     from = { x: box.width / 2, y: box.height / 2 };
     place(from);
     held = three.hold(ctx.board, die, 20, from, size, skin, still(ctx));
-    await waitForThrow(ctx, die);
+    await waitForThrow(ctx, die, before);
     label.textContent = "";
   }
   place(to);
@@ -127,7 +157,7 @@ async function flatD20(
   const label = el(
     "small",
     "dnd-throw-note",
-    mine ? `${before}: click or press Return` : "",
+    mine ? `${before}: click, or press Enter` : "",
   );
   die.append(face, label);
   ctx.board.append(die);
@@ -139,7 +169,7 @@ async function flatD20(
     const box = ctx.board.getBoundingClientRect();
     from = { x: box.width / 2, y: box.height / 2 };
     place(from);
-    await waitForThrow(ctx, die);
+    await waitForThrow(ctx, die, before);
     label.textContent = "";
   }
   place(to);
