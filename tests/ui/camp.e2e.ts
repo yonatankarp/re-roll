@@ -18,7 +18,7 @@ test("levels up, buys at the camp's shop, rests and keeps it all over a reload",
     page.getByRole("heading", { name: "Load a game" }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: /^Load Ambush on the Old Road: Saved/ })
+    .getByRole("button", { name: /^Load Ambush on the Old Road Saved/ })
     .click();
 
   // The level-up's last choice, a spell, then the camp scene.
