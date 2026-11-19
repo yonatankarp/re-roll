@@ -28,6 +28,7 @@ import {
   artFor,
   layout,
   setArt,
+  setBadges,
   setHp,
   setTip,
   sideOf,
@@ -240,6 +241,12 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         for (const mark of MARKED) {
           token.node.classList.toggle(`is-${mark}`, marks.includes(mark));
         }
+        setBadges(
+          token,
+          actor.conditions.filter(
+            (condition) => !(MARKED as readonly string[]).includes(condition),
+          ),
+        );
         setTip(token);
       }
     }

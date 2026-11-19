@@ -41,6 +41,8 @@ const TEXT = /\.(ya?ml|json|md)$/i;
 // A path naming a picture, as YAML, JSON and Markdown write them.
 const REFERENCE = /[\w./-]+\.(?:png|jpe?g|webp)\b/gi;
 const WEBP_MAX = 16383;
+// No screen shows more than this, so a bigger picture only costs memory and download (re-roll#224).
+export const MAX_SIDE = 4096;
 
 const stem = (path: string): string => path.replace(PICTURE, "");
 
@@ -82,6 +84,7 @@ export interface Report {
   readonly converted: number;
   readonly cropped: readonly string[];
   readonly uncropped: readonly string[]; // maps a scene also shows whole
+  readonly shrunk: readonly string[]; // pictures cut down to MAX_SIDE
   readonly skipped: readonly string[];
   readonly bytesBefore: number;
   readonly bytesAfter: number;
@@ -190,10 +193,24 @@ export async function convertBooks(
     for (const block of group) reframed.set(block, union);
   }
 
+  // Pictures bigger than MAX_SIDE shrink to fit it. A battle map's image keeps its pixels, which its squares
+  // are measured in, so a fight never needs its numbers redone.
+  const mapImages = new Set(blocks.map((block) => block.target));
+  const shrink = new Set<string>();
+  for (const [key, paths] of pictures) {
+    const source = paths.find((path) => OLD.test(path)) ?? paths[0];
+    if (mapImages.has(key) || source === undefined) continue;
+    const size = await dimensions(source);
+    if (Math.max(size.width, size.height) > MAX_SIDE) shrink.add(key);
+  }
+
   // Write each WebP beside its old file, then point the text at it, then remove the old file.
   const jobs = [...pictures]
     .filter(
-      ([key, paths]) => crops.has(key) || paths.some((path) => OLD.test(path)),
+      ([key, paths]) =>
+        crops.has(key) ||
+        shrink.has(key) ||
+        paths.some((path) => OLD.test(path)),
     )
     .filter(([key]) => !leftovers.some((path) => stem(path) === key));
   let converted = 0;
@@ -201,7 +218,7 @@ export async function convertBooks(
   await pool(jobs, 3, async ([key, paths]) => {
     const source = paths.find((path) => OLD.test(path)) ?? `${key}.webp`;
     const size = await dimensions(source);
-    if (size.width > WEBP_MAX || size.height > WEBP_MAX) {
+    if (!shrink.has(key) && (size.width > WEBP_MAX || size.height > WEBP_MAX)) {
       skipped.push(
         `${relative(root, source)}: ${String(size.width)}×${String(size.height)} is over WebP's limit`,
       );
@@ -217,6 +234,12 @@ export async function convertBooks(
         width: crop.width,
         height: crop.height,
       });
+    if (shrink.has(key))
+      image = image.resize({
+        width: MAX_SIDE,
+        height: MAX_SIDE,
+        fit: "inside",
+      });
     const hq = highQuality.has(key);
     await image
       .webp(hq ? { quality: 95, smartSubsample: true } : { quality: 85 })
@@ -224,9 +247,24 @@ export async function convertBooks(
     await rename(`${key}.webp.part`, `${key}.webp`);
     converted += 1;
     log(
-      `${relative(root, source)}${crop ? " (cropped)" : ""}${hq ? " (map)" : ""}`,
+      `${relative(root, source)}${crop ? " (cropped)" : ""}${shrink.has(key) ? " (shrunk)" : ""}${hq ? " (map)" : ""}`,
     );
   });
+  // A shrunk picture's size in its art index, by the index file.
+  const resized = new Map<
+    string,
+    { name: string; width: number; height: number }[]
+  >();
+  for (const key of shrink) {
+    if (unwritten.has(key)) continue;
+    const { width, height } = await dimensions(`${key}.webp`);
+    const index = join(dirname(key), "index.json");
+    const name = `${key.slice(dirname(key).length + 1)}.webp`;
+    resized.set(index, [
+      ...(resized.get(index) ?? []),
+      { name, width, height },
+    ]);
+  }
 
   for (const [file, text] of texts) {
     const edits = references
@@ -259,8 +297,20 @@ export async function convertBooks(
         `${indent}crop: { x: ${String(crop.x)}, y: ${String(crop.y)}, width: ${String(crop.width)}, height: ${String(crop.height)} }`;
       reframedHere = true;
     }
-    if (edits.length === 0 && !reframedHere) continue;
     next = lines.join("\n");
+    let sizedHere = false;
+    for (const { name, width, height } of resized.get(file) ?? []) {
+      const entry = new RegExp(
+        `("file":\\s*"${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^}]*?"width":\\s*)\\d+(\\s*,\\s*"height":\\s*)\\d+`,
+      );
+      const sized = next.replace(
+        entry,
+        `$1${String(width)}$2${String(height)}`,
+      );
+      sizedHere ||= sized !== next;
+      next = sized;
+    }
+    if (edits.length === 0 && !reframedHere && !sizedHere) continue;
     await writeFile(file, next);
   }
 
@@ -277,6 +327,10 @@ export async function convertBooks(
       .map((key) => relative(root, `${key}.webp`))
       .sort(),
     uncropped: [...uncropped].sort(),
+    shrunk: [...shrink]
+      .filter((key) => !unwritten.has(key))
+      .map((key) => relative(root, `${key}.webp`))
+      .sort(),
     skipped: skipped.sort(),
     bytesBefore,
     bytesAfter: await totalSize(after),
