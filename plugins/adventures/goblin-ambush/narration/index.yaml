@@ -1,0 +1,26 @@
+version: 1
+clips:
+  af_heart/bbabfafd9dc0d.mp3:
+    scene: road
+    voice: af_heart
+    seconds: 3.5
+  af_heart/1b43481aedafb7.mp3:
+    scene: fight
+    voice: af_heart
+    seconds: 3.5
+  af_heart/e7d1206a96ff4.mp3:
+    scene: fight
+    voice: af_heart
+    seconds: 5.6
+  af_heart/1d1166ccf3d52f.mp3:
+    scene: village
+    voice: af_heart
+    seconds: 3.1
+  af_heart/c412f108e893e.mp3:
+    scene: camp
+    voice: af_heart
+    seconds: 6.2
+  af_heart/1e616eb988b700.mp3:
+    scene: safe-road
+    voice: af_heart
+    seconds: 1.7

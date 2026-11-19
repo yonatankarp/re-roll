@@ -19,8 +19,9 @@ export async function playUntil(
     if (await ready()) return;
     if (await plate.isVisible()) await page.keyboard.press("Escape");
     else if (await onward.isVisible()) await onward.click();
-    // Once tokens stand on the board, Enter would act on it, so the foes' turns are waited out instead.
-    else if (!(await fighting.isVisible())) await page.keyboard.press("Enter");
+    // Once tokens stand on the board, Enter would act on it; Escape only skips the foes' turns as they play.
+    else if (await fighting.isVisible()) await page.keyboard.press("Escape");
+    else await page.keyboard.press("Enter");
     expect(await ready()).toBe(true);
   }).toPass({ intervals: [300], timeout: 30_000 });
 }
