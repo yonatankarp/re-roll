@@ -1,0 +1,296 @@
+- id: srd52:class/cleric
+  name: Cleric
+  hitDie: d8
+  primaryAbilities:
+    - wis
+  savingThrows:
+    - wis
+    - cha
+  weapons:
+    - simple
+  armor:
+    - light
+    - medium
+    - shield
+  spellcasting:
+    ability: wis
+  swaps:
+    cantrips: levelUp
+    spells: prepare
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/spellcasting
+        - srd52:feature/divine-order
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            - history
+            - insight
+            - medicine
+            - persuasion
+            - religion
+      slots:
+        - 2
+      scaling:
+        cantrips: 3
+        preparedSpells: 4
+    - level: 2
+      grants:
+        - srd52:feature/channel-divinity
+      slots:
+        - 3
+      scaling:
+        divineSpark: 1
+        channelDivinity: 2
+        cantrips: 3
+        preparedSpells: 5
+    - level: 3
+      grants:
+        - srd52:feature/cleric-subclass
+      slots:
+        - 4
+        - 2
+      scaling:
+        channelDivinity: 2
+        cantrips: 3
+        preparedSpells: 6
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+      scaling:
+        channelDivinity: 2
+        cantrips: 4
+        preparedSpells: 7
+    - level: 5
+      grants:
+        - srd52:feature/sear-undead
+      slots:
+        - 4
+        - 3
+        - 2
+      scaling:
+        channelDivinity: 2
+        cantrips: 4
+        preparedSpells: 9
+    - level: 6
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+      scaling:
+        channelDivinity: 3
+        cantrips: 4
+        preparedSpells: 10
+    - level: 7
+      grants:
+        - srd52:feature/blessed-strikes
+      slots:
+        - 4
+        - 3
+        - 3
+        - 1
+      scaling:
+        divineSpark: 2
+        channelDivinity: 3
+        cantrips: 4
+        preparedSpells: 11
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 2
+      scaling:
+        channelDivinity: 3
+        cantrips: 4
+        preparedSpells: 12
+    - level: 9
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 1
+      scaling:
+        channelDivinity: 3
+        cantrips: 4
+        preparedSpells: 14
+    - level: 10
+      grants:
+        - srd52:feature/divine-intervention
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+      scaling:
+        channelDivinity: 3
+        cantrips: 5
+        preparedSpells: 15
+    - level: 11
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+      scaling:
+        channelDivinity: 3
+        pullOfDeathDie: 6
+        cantrips: 5
+        preparedSpells: 16
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+      scaling:
+        channelDivinity: 3
+        cantrips: 5
+        preparedSpells: 16
+    - level: 13
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+      scaling:
+        divineSpark: 3
+        channelDivinity: 3
+        cantrips: 5
+        preparedSpells: 17
+    - level: 14
+      grants:
+        - srd52:feature/improved-blessed-strikes
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+      scaling:
+        channelDivinity: 3
+        cantrips: 5
+        preparedSpells: 17
+    - level: 15
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        channelDivinity: 3
+        cantrips: 5
+        preparedSpells: 18
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        channelDivinity: 3
+        cantrips: 5
+        preparedSpells: 18
+    - level: 17
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+        - 1
+      scaling:
+        channelDivinity: 3
+        cantrips: 5
+        preparedSpells: 19
+    - level: 18
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 1
+        - 1
+        - 1
+        - 1
+      scaling:
+        divineSpark: 4
+        channelDivinity: 4
+        cantrips: 5
+        preparedSpells: 20
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        channelDivinity: 4
+        cantrips: 5
+        preparedSpells: 21
+    - level: 20
+      grants:
+        - srd52:feature/greater-divine-intervention
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 2
+        - 2
+        - 1
+        - 1
+      scaling:
+        channelDivinity: 4
+        cantrips: 5
+        preparedSpells: 22

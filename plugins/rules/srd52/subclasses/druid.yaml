@@ -1,0 +1,17 @@
+- id: srd52:subclass/circle-of-the-land
+  name: Circle of the Land
+  class: srd52:class/druid
+  levels:
+    - level: 3
+      grants:
+        - srd52:feature/circle-of-the-land-spells
+        - srd52:feature/land-s-aid
+    - level: 6
+      grants:
+        - srd52:feature/natural-recovery
+    - level: 10
+      grants:
+        - srd52:feature/nature-s-ward
+    - level: 14
+      grants:
+        - srd52:feature/nature-s-sanctuary

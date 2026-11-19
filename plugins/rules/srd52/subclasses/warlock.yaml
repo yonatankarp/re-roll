@@ -1,0 +1,17 @@
+- id: srd52:subclass/fiend-patron
+  name: Fiend Patron
+  class: srd52:class/warlock
+  levels:
+    - level: 3
+      grants:
+        - srd52:feature/dark-one-s-blessing
+        - srd52:feature/fiend-spells
+    - level: 6
+      grants:
+        - srd52:feature/dark-one-s-own-luck
+    - level: 10
+      grants:
+        - srd52:feature/fiendish-resilience
+    - level: 14
+      grants:
+        - srd52:feature/hurl-through-hell

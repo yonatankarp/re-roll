@@ -499,7 +499,7 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
     );
     const shaped = actorIn(done.state, PLAYER_ACTOR);
     const form = formOf(shaped);
-    expect(form).toMatch(/^phb:monster\//);
+    expect(form).toMatch(/^(phb|srd52):monster\//); // the SRD ships beasts too
     const stats = deriveStats(shaped, run);
     expect(stats.creatureType).toBe(deriveStats(druid, run).creatureType);
     expect(stats.actions.some(({ id }) => id.startsWith("monster:"))).toBe(

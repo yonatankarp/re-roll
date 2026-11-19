@@ -1,0 +1,302 @@
+- id: srd52:class/warlock
+  name: Warlock
+  hitDie: d8
+  primaryAbilities:
+    - cha
+  savingThrows:
+    - wis
+    - cha
+  weapons:
+    - simple
+  armor:
+    - light
+  spellcasting:
+    ability: cha
+  swaps:
+    cantrips: levelUp
+    spells: levelUp
+    options: levelUp
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/eldritch-invocations
+        - srd52:feature/pact-magic
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            - arcana
+            - deception
+            - history
+            - intimidation
+            - investigation
+            - nature
+            - religion
+      slots:
+        - 1
+      scaling:
+        eldritchInvocations: 1
+        cantrips: 2
+        preparedSpells: 2
+    - level: 2
+      grants:
+        - srd52:feature/magical-cunning
+      slots:
+        - 2
+      scaling:
+        eldritchInvocations: 3
+        cantrips: 2
+        preparedSpells: 3
+    - level: 3
+      grants:
+        - srd52:feature/warlock-subclass
+      slots:
+        - 0
+        - 2
+      scaling:
+        eldritchInvocations: 3
+        cantrips: 2
+        preparedSpells: 4
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 0
+        - 2
+      scaling:
+        eldritchInvocations: 3
+        cantrips: 3
+        preparedSpells: 5
+    - level: 5
+      grants: []
+      slots:
+        - 0
+        - 0
+        - 2
+      scaling:
+        eldritchInvocations: 5
+        cantrips: 3
+        preparedSpells: 6
+    - level: 6
+      grants: []
+      slots:
+        - 0
+        - 0
+        - 2
+      scaling:
+        eldritchInvocations: 5
+        cantrips: 3
+        preparedSpells: 7
+    - level: 7
+      grants: []
+      slots:
+        - 0
+        - 0
+        - 0
+        - 2
+      scaling:
+        eldritchInvocations: 6
+        cantrips: 3
+        preparedSpells: 8
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 0
+        - 0
+        - 0
+        - 2
+      scaling:
+        eldritchInvocations: 6
+        cantrips: 3
+        preparedSpells: 9
+    - level: 9
+      grants:
+        - srd52:feature/contact-patron
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 2
+      scaling:
+        eldritchInvocations: 7
+        cantrips: 3
+        preparedSpells: 10
+    - level: 10
+      grants: []
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 2
+      scaling:
+        eldritchInvocations: 7
+        cantrips: 4
+        preparedSpells: 10
+    - level: 11
+      grants:
+        - srd52:feature/mystic-arcanum
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 3
+      scaling:
+        eldritchInvocations: 7
+        cantrips: 4
+        preparedSpells: 11
+      choices:
+        - kind: spells
+          id: arcanum-6
+          count: 1
+          minLevel: 6
+          maxLevel: 6
+          list: srd52:class/warlock
+          freeCast: true
+          swap: levelUp
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 3
+      scaling:
+        eldritchInvocations: 8
+        cantrips: 4
+        preparedSpells: 11
+    - level: 13
+      grants:
+        - srd52:feature/mystic-arcanum
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 3
+      scaling:
+        eldritchInvocations: 8
+        cantrips: 4
+        preparedSpells: 12
+      choices:
+        - kind: spells
+          id: arcanum-7
+          count: 1
+          minLevel: 7
+          maxLevel: 7
+          list: srd52:class/warlock
+          freeCast: true
+          swap: levelUp
+    - level: 14
+      grants: []
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 3
+      scaling:
+        eldritchInvocations: 8
+        cantrips: 4
+        preparedSpells: 12
+    - level: 15
+      grants:
+        - srd52:feature/mystic-arcanum
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 3
+      scaling:
+        eldritchInvocations: 9
+        cantrips: 4
+        preparedSpells: 13
+      choices:
+        - kind: spells
+          id: arcanum-8
+          count: 1
+          minLevel: 8
+          maxLevel: 8
+          list: srd52:class/warlock
+          freeCast: true
+          swap: levelUp
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 3
+      scaling:
+        eldritchInvocations: 9
+        cantrips: 4
+        preparedSpells: 13
+    - level: 17
+      grants:
+        - srd52:feature/mystic-arcanum
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 4
+      scaling:
+        eldritchInvocations: 9
+        cantrips: 4
+        preparedSpells: 14
+      choices:
+        - kind: spells
+          id: arcanum-9
+          count: 1
+          minLevel: 9
+          maxLevel: 9
+          list: srd52:class/warlock
+          freeCast: true
+          swap: levelUp
+    - level: 18
+      grants: []
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 4
+      scaling:
+        eldritchInvocations: 10
+        cantrips: 4
+        preparedSpells: 14
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 4
+      scaling:
+        eldritchInvocations: 10
+        cantrips: 4
+        preparedSpells: 15
+    - level: 20
+      grants:
+        - srd52:feature/eldritch-master
+      slots:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 4
+      scaling:
+        eldritchInvocations: 10
+        cantrips: 4
+        preparedSpells: 15
