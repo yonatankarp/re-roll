@@ -656,6 +656,7 @@ mod tests {
         assert!(is_part_file("rules", "monsters/goblin.yaml"));
         assert!(is_part_file("adventures", "art/Scene 1.PNG"));
         assert!(is_part_file("assets", "index.json"));
+        assert!(is_part_file("adventures", "assets/credits.json"));
         assert!(is_part_file("library", "0001-introduction.md"));
         for (folder, path) in [
             ("adventures", ""),
@@ -673,7 +674,7 @@ mod tests {
             ("adventures", "yaml"),
             ("adventures", "a/.yaml"),
             ("adventures", "plugin"),
-            ("adventures", "data.json"),
+            ("adventures", "data.html"),
             ("assets", "notes.md"),
             ("library", "cover.webp"),
             ("sources", "book.md"),

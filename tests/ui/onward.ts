@@ -6,8 +6,11 @@ export async function playUntil(
   page: Page,
   ready: () => Promise<boolean>,
 ): Promise<void> {
+  // Alert asks to swap Initiative as a fight starts; until it's answered a map lights no squares.
   const onward = page
-    .getByRole("button", { name: /^(Carry on|Drive them off)$/ })
+    .getByRole("button", {
+      name: /^(Carry on|Drive them off|Keep your place)$/,
+    })
     .first();
   await expect(async () => {
     if (await ready()) return;

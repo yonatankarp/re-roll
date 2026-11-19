@@ -124,10 +124,10 @@ async function pluginFiles(): Promise<Record<string, string>> {
     "plugins/adventures/goblin-ambush",
   ]) {
     for (const name of await readdir(root, { recursive: true })) {
-      if (name.endsWith(".yaml")) {
-        const file = `${root}/${name.replaceAll("\\", "/")}`;
-        files[file] = await readFile(file, "utf8");
-      }
+      const file = `${root}/${name.replaceAll("\\", "/")}`;
+      if (name.endsWith(".yaml")) files[file] = await readFile(file, "utf8");
+      // The adventure's pictures: only that they're there is checked.
+      else if (/\.\w+$/.test(name)) files[file] = "";
     }
   }
   files["plugins/rules/charge-test/plugin.yaml"] = [

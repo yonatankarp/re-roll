@@ -18,8 +18,9 @@ async function intoFight(page: Page): Promise<void> {
     .getByRole("button", { name: /Perception ?\] Check the treeline$/ })
     .click();
   const map = page.locator(".dnd-cell").first();
+  // Alert asks to swap Initiative as a fight starts; until it's answered the map lights no squares.
   const onward = page.getByRole("button", {
-    name: /^(Carry on|Drive them off)$/,
+    name: /^(Carry on|Drive them off|Keep your place)$/,
   });
   await expect(async () => {
     if (await onward.first().isVisible()) await onward.first().click();
