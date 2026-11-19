@@ -148,6 +148,22 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     layout(ctx);
   }).observe(field);
   wireInput(ctx);
+  // Esc skips what's playing wherever focus is, as the hint says, unless something else took the key.
+  const skipOnEscape = (event: KeyboardEvent): void => {
+    if (
+      event.key !== "Escape" ||
+      !ctx.playing ||
+      ctx.throwNow ||
+      event.defaultPrevented ||
+      document.querySelector("dialog[open]")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    ctx.skipping = true;
+    ctx.wake?.();
+  };
+  document.addEventListener("keydown", skipOnEscape);
   slot.append(wireZoom(ctx, view));
   slot.querySelector(".dnd-zoom")?.append(legend);
 
@@ -333,6 +349,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     },
     // What was queued is dropped and what is playing ends at once, in silence.
     dispose(): void {
+      document.removeEventListener("keydown", skipOnEscape);
       ctx.queue.length = 0;
       ctx.skipping = true;
       ctx.throwNow?.();

@@ -37,7 +37,15 @@ export function artPlate(): ArtPlate {
   const element = el("section", { class: "art-plate" });
   element.hidden = true;
   element.setAttribute("role", "status"); // read out as it appears
+  let back: Element | null = null; // what had focus as the plate showed, for its Continue button
   const close = (): void => {
+    if (
+      element.contains(document.activeElement) &&
+      back instanceof HTMLElement &&
+      back.isConnected
+    ) {
+      back.focus({ preventScroll: true });
+    }
     element.hidden = true;
     element.replaceChildren();
     document.removeEventListener("keydown", onKey, true);
@@ -73,6 +81,7 @@ export function artPlate(): ArtPlate {
           ),
         ),
       );
+      back = document.activeElement;
       element.hidden = false;
       enter(element);
       document.addEventListener("keydown", onKey, true);

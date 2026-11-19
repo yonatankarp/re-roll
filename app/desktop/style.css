@@ -300,6 +300,12 @@ button:hover {
   gap: 8px;
 }
 
+.bar-end {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
 .text-size button {
   padding: 4px 8px;
   font-size: 0.9rem;
@@ -343,7 +349,9 @@ button:hover {
 
 /* A focused option must not end up hidden under the sticky header. */
 html {
-  scroll-padding-top: 88px;
+  scroll-padding-top: calc(
+    var(--bar-height, 5.2rem) + 8px
+  ); /* set from the bar, which grows with the text and wraps */
 }
 
 .scene-text {

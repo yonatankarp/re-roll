@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { resolve } from "node:path";
 import { type Page, expect, test } from "@playwright/test";
+import { playUntil } from "./onward.ts";
 
 // Keyboard, focus and screen-reader checks (#218), with an axe pass on each main screen.
 
@@ -67,6 +68,11 @@ test("the menu, setup and game pass axe, and the setup's choices work by keyboar
 
   await page.getByRole("button", { name: "Begin the adventure" }).click();
   await readyHero(page);
+  await expect(
+    page.getByRole("button", {
+      name: /^Hollis Brand .*, open the character sheet$/,
+    }),
+  ).toHaveAttribute("aria-keyshortcuts", "Control+I Meta+I");
   await axe(page);
 });
 
@@ -93,6 +99,10 @@ test("the die waits as a focused button and the foe's plate has a way out", asyn
     .poll(() => page.evaluate(() => document.activeElement?.tagName))
     .not.toBe("BODY");
 
+  // The battle map, once the fight starts.
+  await playUntil(page, () => page.locator(".dnd-cell").first().isVisible());
+  await axe(page);
+
   // A foe's plate shows only with a book's art, which CI lacks, so the page's own module draws one.
   const plateModule = `/@fs/${resolve(
     import.meta.dirname,
@@ -100,6 +110,8 @@ test("the die waits as a focused button and the foe's plate has a way out", asyn
   )
     .replaceAll("\\", "/")
     .replace(/^\//, "")}`;
+  const journal = page.getByRole("button", { name: "Journal", exact: true });
+  await journal.focus();
   await page.evaluate(async (url) => {
     const { artPlate } = (await import(
       url
@@ -117,8 +129,11 @@ test("the die waits as a focused button and the foe's plate has a way out", asyn
   const leave = plate.getByRole("button", { name: /^Continue/ });
   await expect(leave).toHaveAttribute("aria-keyshortcuts", "Escape");
   await expect(plate).toContainText("Esc");
-  await leave.click();
+  // Its button gives focus back to where it was as the plate came.
+  await leave.focus();
+  await page.keyboard.press("Enter");
   await expect(plate).toBeHidden();
+  await expect(journal).toBeFocused();
 });
 
 test("shortcuts work on a non-Latin layout and say Ctrl off a Mac", async ({
@@ -159,6 +174,23 @@ test("text size grows the page's text and is kept", async ({ page }) => {
   expect(await size()).toBe("22.1px");
   await page.reload();
   expect(await size()).toBe("22.1px");
+  // On a phone-width window the bar wraps and grows: the page doesn't scroll sideways, and a focused
+  // control scrolls clear of the bar.
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const bar = document.querySelector<HTMLElement>("header.top");
+        const padding = parseFloat(
+          getComputedStyle(document.documentElement).scrollPaddingTop,
+        );
+        return (
+          document.documentElement.scrollWidth <= innerWidth &&
+          padding >= (bar?.offsetHeight ?? Infinity)
+        );
+      }),
+    )
+    .toBe(true);
   await page.keyboard.press("Control+0");
   expect(await size()).toBe("17px");
   await expect(
@@ -194,6 +226,12 @@ test("deleting a save leaves focus on something that takes it", async ({
   await expect(
     page.getByRole("button", { name: /^Damaged save/ }),
   ).toBeDisabled();
+  // A card is named by its own words, after a "Load" read out but not shown.
+  await expect(
+    page.getByRole("button", {
+      name: /^Load Hollis Brand, .*Ambush on the Old Road/,
+    }),
+  ).toBeEnabled();
   await axe(page);
   const deletes = page.locator(".save-delete");
   await expect(deletes).toHaveCount(2);

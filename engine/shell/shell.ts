@@ -30,7 +30,7 @@ export function mountShell(
   const notice = el("div", { class: "notice" });
   notice.setAttribute("role", "status");
   // It hangs over the page, so a click (or Esc, for an error) puts it away, except on its details.
-  notice.title = "Click to dismiss";
+  notice.title = "Click to dismiss, or press Esc for an error";
   notice.addEventListener("click", (event) => {
     if (!(event.target as Element).closest("details")) ctx.say("");
   });
@@ -63,6 +63,16 @@ export function mountShell(
     ),
     screen,
   );
+  // A focused control scrolls clear of the sticky bar, however tall the text size and a narrow window make it.
+  const top = root.querySelector<HTMLElement>("header.top");
+  if (top) {
+    new ResizeObserver(() => {
+      document.documentElement.style.setProperty(
+        "--bar-height",
+        `${String(top.offsetHeight)}px`,
+      );
+    }).observe(top);
+  }
   const actions = root.querySelector("nav");
   if (!actions) throw new Error("The page header is missing");
   const ctx: ShellContext = {

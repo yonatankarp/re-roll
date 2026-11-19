@@ -993,7 +993,7 @@ export function createGame({
         }
         const savedAt = await savedAtOf(path);
         const when = savedAt
-          ? new Date(savedAt).toLocaleString(undefined, {
+          ? new Date(savedAt).toLocaleString("en", {
               dateStyle: "medium",
               timeStyle: "short",
             })
