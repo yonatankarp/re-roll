@@ -14,11 +14,13 @@ export async function playUntil(
     .first();
   // A foe's first sight lays its picture over the page; Escape puts it away, as a player would.
   const plate = page.locator(".art-plate");
+  const fighting = page.locator(".dnd-token").first();
   await expect(async () => {
     if (await ready()) return;
     if (await plate.isVisible()) await page.keyboard.press("Escape");
     else if (await onward.isVisible()) await onward.click();
-    else await page.keyboard.press("Enter");
+    // Once tokens stand on the board, Enter would act on it, so the foes' turns are waited out instead.
+    else if (!(await fighting.isVisible())) await page.keyboard.press("Enter");
     expect(await ready()).toBe(true);
   }).toPass({ intervals: [300], timeout: 30_000 });
 }
