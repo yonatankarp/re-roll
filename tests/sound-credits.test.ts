@@ -59,8 +59,8 @@ describe("bundled sounds", () => {
       },
     ]);
     expect(lines).toEqual([
-      "Audio: “Song” by Ann, from https://a, under the Creative Commons Attribution 4.0 licence.",
-      "Sounds from https://k by Kit, under CC0 1.0 (public domain).",
+      "Audio: “Song” by Ann, from https://a, under the Creative Commons Attribution 4.0 licence (https://creativecommons.org/licenses/by/4.0/).",
+      "Sounds from https://k by Kit, under CC0 1.0 (public domain, https://creativecommons.org/publicdomain/zero/1.0/).",
     ]);
   });
 });

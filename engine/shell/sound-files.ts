@@ -41,12 +41,16 @@ function load(
   return buffer;
 }
 
-// A short sound for a moment, into the effects, under the one volume. Loaded the first time.
-export function playSting(name: Sting): void {
+// A short sound for a moment, into the effects, under the one volume. Loaded the first time, and
+// dropped if `wanted` says no by then, such as when the game screen went while it loaded.
+export function playSting(
+  name: Sting,
+  wanted: () => boolean = () => true,
+): void {
   const audio = shellAudio();
   if (!audio) return;
   void load(audio.context, name).then((buffer) => {
-    if (!buffer) return;
+    if (!buffer || !wanted()) return;
     const source = audio.context.createBufferSource();
     source.buffer = buffer;
     const level = audio.context.createGain();

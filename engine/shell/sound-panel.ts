@@ -181,10 +181,14 @@ export function soundControls(
       view = null; // so nothing starts again
       narration.stop();
       ambience.play("none");
-      music.play("none");
+      music.stop();
     },
     update(next) {
-      if (settings.effects) stingsBetween(view, next).forEach(playSting);
+      if (settings.effects) {
+        for (const sting of stingsBetween(view, next)) {
+          playSting(sting, () => view !== null);
+        }
+      }
       view = next;
       apply();
     },
@@ -194,7 +198,7 @@ export function soundControls(
         camping = camp.open && camp.dataset.notice === undefined;
         if (camp.dataset.rested !== undefined) {
           delete camp.dataset.rested;
-          if (settings.effects) playSting("rest");
+          if (settings.effects) playSting("rest", () => view !== null);
         }
         apply();
       }).observe(camp, {

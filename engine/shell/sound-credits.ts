@@ -13,9 +13,12 @@ export interface SoundCredit {
 
 export const SOUND_LICENCES: Readonly<Record<SoundCredit["licence"], string>> =
   {
-    "CC0-1.0": "CC0 1.0 (public domain)",
-    "CC-BY-3.0": "the Creative Commons Attribution 3.0 licence",
-    "CC-BY-4.0": "the Creative Commons Attribution 4.0 licence",
+    "CC0-1.0":
+      "CC0 1.0 (public domain, https://creativecommons.org/publicdomain/zero/1.0/)",
+    "CC-BY-3.0":
+      "the Creative Commons Attribution 3.0 licence (https://creativecommons.org/licenses/by/3.0/)",
+    "CC-BY-4.0":
+      "the Creative Commons Attribution 4.0 licence (https://creativecommons.org/licenses/by/4.0/)",
   };
 
 export function soundCredits(credits: readonly SoundCredit[]): string[] {

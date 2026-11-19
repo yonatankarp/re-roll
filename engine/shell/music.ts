@@ -31,6 +31,7 @@ export function moodOf(
 export interface MusicPlayer {
   readonly play: (mood: Mood) => void;
   readonly duck: (ducked: boolean) => void;
+  readonly stop: () => void; // silent at once, such as when the game screen goes
 }
 
 interface Track {
@@ -38,8 +39,10 @@ interface Track {
   readonly level: GainNode;
 }
 
+// Shared by every game screen, since an element's Web Audio source can't be made twice or let go.
+const tracks = new Map<Mood, Track>();
+
 export function musicPlayer(): MusicPlayer {
-  const tracks = new Map<Mood, Track>();
   let playing: Mood = "none";
   let ducked = false;
 
@@ -105,6 +108,14 @@ export function musicPlayer(): MusicPlayer {
       if (on === ducked) return;
       ducked = on;
       level();
+    },
+    stop() {
+      playing = "none";
+      for (const { element, level } of tracks.values()) {
+        element.pause();
+        level.gain.cancelScheduledValues(level.context.currentTime);
+        level.gain.value = 0;
+      }
     },
   };
 }
