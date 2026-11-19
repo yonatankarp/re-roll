@@ -24,7 +24,7 @@ if (root === undefined || values.out === undefined) {
 }
 const out = values.out;
 
-const { index, zips, unpacked } = await packStore(root);
+const { index, zips, unpacked, untagged } = await packStore(root);
 await mkdir(out, { recursive: true });
 for (const [file, zip] of zips) await writeFile(join(out, file), zip);
 await writeFile(join(out, STORE_INDEX), `${JSON.stringify(index, null, 2)}\n`);
@@ -33,6 +33,10 @@ for (const { id, size, plugins } of index.packages)
     `${id}: ${(size / 1024 ** 2).toFixed(1)} MB${plugins.length > 0 ? `, plugins ${plugins.map((plugin) => plugin.id).join(", ")}` : ""}`,
   );
 if (unpacked.length > 0) console.warn(`In no package: ${unpacked.join(", ")}`);
+if (untagged.length > 0)
+  console.log(
+    `Left out ${String(untagged.length)} pictures no art index tag shows.`,
+  );
 console.log(`Wrote ${String(zips.size)} packages and ${STORE_INDEX} to ${out}`);
 
 const repo = values.publish;

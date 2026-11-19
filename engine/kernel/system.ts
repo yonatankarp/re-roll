@@ -345,6 +345,9 @@ export interface ImportKind {
 // What the adventure has planned for the ways an encounter can end.
 export interface EncounterOptions {
   readonly canFlee: boolean; // offer the player a way out mid-fight
+  // The way out is only the story's default retreat, so a stand-off still ends as won rather than
+  // sending the party back to choose the same fight again.
+  readonly standOffWins?: boolean;
   // Losing without the player's character dying ends the encounter with outcome "defeat",
   // and otherwise it's partyDefeated. The character dying is always partyDefeated.
   readonly defeatContinues: boolean;

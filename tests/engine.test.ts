@@ -1135,7 +1135,7 @@ describe("encounter outcomes", () => {
     expect(seen).toEqual([{ canFlee: true, defeatContinues: true }]);
   });
 
-  it("changes nothing for an encounter with no outcomes", async () => {
+  it("carries on with the choice's plans after a win when an encounter has no outcomes", async () => {
     const seen: EncounterOptions[] = [];
     const scenes = SCENES.replace(
       "- { id: captured, text: Captured. }\n- { id: fled, text: Fled. }\n",
@@ -1146,13 +1146,65 @@ describe("encounter outcomes", () => {
       fightsEndWith(null, seen),
     );
     const result = choose(run, startRun(run, "s"), "0");
-    expect(seen).toEqual([{ canFlee: false, defeatContinues: false }]);
+    expect(seen).toEqual([
+      { canFlee: true, standOffWins: true, defeatContinues: false },
+    ]);
     expect(result.state.story.scene).toBe("safe");
-    expect(
-      result.events.flatMap((event) =>
-        event.kind === "framePushed" ? [event.frame.kind] : [],
-      ),
-    ).not.toContain("story:afterEncounter");
+    expect(result.state.story.flags.won).toBe(true);
+  });
+
+  it("falls back into the scene the fight began in when an encounter has no onFlee", async () => {
+    const seen: EncounterOptions[] = [];
+    const scenes = `
+- id: start
+  text: Start.
+  choices:
+    - { label: Walk, effects: [{ kind: goto, scene: road }] }
+- id: road
+  text: Road.
+  choices:
+    - label: Fight
+      effects:
+        - { kind: startEncounter, encounter: fight }
+        - { kind: setFlag, flag: won }
+        - { kind: goto, scene: safe }
+- { id: safe, text: Safe. }
+`;
+    const { run } = await loadInline(
+      { "encounters.yaml": "- { id: fight }\n", "scenes.yaml": scenes },
+      fightsEndWith("flee", seen),
+    );
+    const walked = choose(run, startRun(run, "s"), "0");
+    const fled = choose(run, walked, "0");
+    expect(seen).toEqual([
+      { canFlee: true, standOffWins: true, defeatContinues: false },
+    ]);
+    expect(fled.state.story.scene).toBe("road");
+    expect(fled.state.story.visits?.road).toBe(2);
+    expect(fled.state.story.flags.won).toBeUndefined();
+    // No replaysExactly: this system flees every fight, so a bot walks back and forth forever.
+  });
+
+  it("offers no default retreat into a scene whose choices the fight's own choice closed", async () => {
+    const seen: EncounterOptions[] = [];
+    const scenes = `
+- id: start
+  text: Start.
+  choices:
+    - label: Fight
+      when: { kind: flag, flag: tried, is: false }
+      effects:
+        - { kind: setFlag, flag: tried }
+        - { kind: startEncounter, encounter: fight }
+        - { kind: goto, scene: safe }
+- { id: safe, text: Safe. }
+`;
+    const { run } = await loadInline(
+      { "encounters.yaml": "- { id: fight }\n", "scenes.yaml": scenes },
+      fightsEndWith(null, seen),
+    );
+    choose(run, startRun(run, "s"), "0");
+    expect(seen).toEqual([{ canFlee: false, defeatContinues: false }]);
   });
 
   it("clears an old outcome when a later fight is won", async () => {

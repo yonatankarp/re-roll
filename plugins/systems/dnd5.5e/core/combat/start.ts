@@ -80,7 +80,7 @@ export function startCombat(
     readonly sunlight?: true | undefined;
   },
   context: Context,
-  { canFlee, defeatContinues }: EncounterOptions,
+  { canFlee, standOffWins, defeatContinues }: EncounterOptions,
 ): SystemResult {
   const party = Object.values(context.state.actors).filter(
     (actor) => actor.side === "party" && !isDead(actor),
@@ -329,6 +329,7 @@ export function startCombat(
         }
       : {}),
     ...(canFlee ? { canFlee } : {}),
+    ...(canFlee && standOffWins ? { standOffWins: true as const } : {}),
     ...(defeatContinues ? { defeatContinues } : {}),
     ...(encounter.loot ? { loot: encounter.loot } : {}),
     ...(encounter.sunlight ? { sunlight: true as const } : {}),

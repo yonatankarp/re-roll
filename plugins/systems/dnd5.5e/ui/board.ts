@@ -28,6 +28,7 @@ import {
   artFor,
   layout,
   setArt,
+  setBadges,
   setHp,
   setTip,
   sideOf,
@@ -169,9 +170,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
 
   // Values, arrivals and removals wait until the queue is done, so they don't spoil what's playing.
   const sync = (update: BoardUpdate, settle: boolean): void => {
-    // The book's battle map when the fight has one, cut to the fight's squares; otherwise the scene's picture.
+    // The book's battle map when the fight has one, cut to the fight's squares; otherwise the plain mat,
+    // as a scene's picture stretched under the grid matches none of its squares.
     const map = extraOf(update).map ?? null;
-    const backdrop = map ? `${update.assetRoot}/${map.image}` : update.sceneArt;
+    const backdrop = map ? `${update.assetRoot}/${map.image}` : null;
     // A fight still playing keeps its map; a new one gets its own before its start cue plays.
     if (backdrop !== ctx.sceneArt && (settle || ctx.tokens.size === 0)) {
       ctx.sceneArt = backdrop;
@@ -255,6 +257,12 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         for (const mark of MARKED) {
           token.node.classList.toggle(`is-${mark}`, marks.includes(mark));
         }
+        setBadges(
+          token,
+          actor.conditions.filter(
+            (condition) => !(MARKED as readonly string[]).includes(condition),
+          ),
+        );
         setTip(token);
       }
     }
