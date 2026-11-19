@@ -19,3 +19,7 @@ serde_json = "1"
 # glib 0.18.5 with the RUSTSEC-2024-0429 fix backported (Linux only); see patches/README.md.
 [patch.crates-io]
 glib = { path = "patches/glib-0.18.5" }
+
+# Releases are built only in CI (.github/workflows/release.yml); strip drops the symbols and debug paths.
+[profile.release]
+strip = true

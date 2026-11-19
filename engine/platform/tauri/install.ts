@@ -14,7 +14,7 @@ import { ALLOWED_EXTENSIONS, extensionOf } from "../../run/loader.ts";
 // or a book laid out like the content folder: adventures/<id>, rules/<id>, worlds/<id>, assets/<book>, library/<book>.
 
 const MANIFEST = "plugin.yaml";
-// shortcut: files are unpacked a batch at a time, but the zip itself is held whole; stream it if zips grow past this.
+// shortcut: files are unpacked a batch at a time, but the zip itself is held whole (a Store download is capped at 1 GB in main.rs); stream it if zips grow toward that.
 export const MAX_UNPACKED_BYTES = 4 * 1024 ** 3;
 // Each pass over the zip reads every entry's header, so files are unpacked many at once, up to this much.
 export const BATCH_BYTES = 64 * 1024 ** 2;
