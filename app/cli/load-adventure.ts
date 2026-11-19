@@ -29,7 +29,11 @@ export async function loadAdventure(
   adventure: string,
 ): Promise<{ readonly registry: Registry; readonly run: RunContext }> {
   let load = loads.get(adventure);
-  if (!load) loads.set(adventure, (load = loadRegistry(adventure)));
+  if (!load) {
+    loads.set(adventure, (load = loadRegistry(adventure)));
+    // A failed load isn't kept, so fixing the content and asking again loads it again.
+    load.catch(() => loads.delete(adventure));
+  }
   const registry = await load;
   return { registry, run: createRunContext(registry, adventure) };
 }

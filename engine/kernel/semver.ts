@@ -15,6 +15,9 @@ export function satisfiesCaret(version: string, range: string): boolean {
 
   if (major !== wantMajor) return false;
   if (major === 0 && parts.length > 1 && minor !== wantMinor) return false;
+  // ^0.0.x allows only 0.0.x, as in npm: below 0.1 every patch may break.
+  if (major === 0 && minor === 0 && parts.length > 2)
+    return patch === wantPatch;
   if (minor !== wantMinor) return minor > wantMinor;
   return patch >= wantPatch;
 }

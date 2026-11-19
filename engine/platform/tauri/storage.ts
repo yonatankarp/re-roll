@@ -59,7 +59,10 @@ export function createTauriReader(): ContentReader {
       if (!(await exists(await fullPath(prefix)))) return [];
       const found: StorageEntry[] = [];
       await walk(prefix, found);
-      return found.sort((a, b) => a.path.localeCompare(b.path));
+      // Code-point order, the same in every locale, so what loads first never depends on the machine.
+      return found.sort((a, b) =>
+        a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+      );
     },
   };
 }

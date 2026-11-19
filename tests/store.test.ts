@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { StoreIndex, StorePackage } from "../engine/shell/store-index.ts";
+import {
+  type StoreIndex,
+  StoreIndexSchema,
+  type StorePackage,
+} from "../engine/shell/store-index.ts";
 import {
   installOrder,
   packageStatus,
@@ -166,5 +170,32 @@ describe("installOrder", () => {
         new Set(),
       ),
     ).toThrow(/needs phb/);
+  });
+});
+
+describe("a hostile store", () => {
+  it("has its index refused when a package's file, hash or ids aren't what the game can use", () => {
+    const good = pkg("phb");
+    expect(StoreIndexSchema.safeParse(index(good)).success).toBe(true);
+    for (const bad of [
+      { ...good, file: "../escape.zip" },
+      { ...good, file: "phb.exe" },
+      { ...good, sha256: "nope" },
+      { ...good, size: -1 },
+      { ...good, id: "Not An Id" },
+      { ...good, parts: ["rules/../etc"] },
+      { ...good, extra: true },
+    ])
+      expect(StoreIndexSchema.safeParse(index(bad)).success).toBe(false);
+    expect(
+      StoreIndexSchema.safeParse({ format: 2, packages: [] }).success,
+    ).toBe(false);
+  });
+
+  it("never reads Object.prototype as a package's install record", () => {
+    const named = pkg("constructor");
+    expect(
+      packageStatus("a/store", named, { repos: [], installed: {} }, new Set()),
+    ).toBe("install");
   });
 });
