@@ -159,6 +159,7 @@ export function campfire(
       const summary = el("ul", { class: "campfire-recovered" });
       summary.append(...lines);
       resting = false;
+      dialog.dataset.rested = ""; // for the sound
       show(
         "Rested",
         lines.length > 0 ? "" : "There was nothing to recover.",

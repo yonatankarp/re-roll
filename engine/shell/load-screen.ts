@@ -80,12 +80,9 @@ function card(
         ),
       ),
     );
-  open.setAttribute(
-    "aria-label",
-    save.damaged
-      ? `Damaged save ${save.label}`
-      : `Load ${save.label}${who ? `, ${who}` : ""}${current ? ", the game in progress" : ""}`,
-  );
+  // What the card shows names it, so speech and voice control match the words on it.
+  if (!save.damaged)
+    open.prepend(el("span", { class: "visually-hidden", text: "Load " }));
   const item = el("li", { class: "save-card" }, open);
   const del = confirmButton("Delete", save.label, () => {
     remove(save, item);
@@ -142,12 +139,13 @@ export function loadSkeleton(): HTMLElement {
 }
 
 // Folds a deleted save's card away where it was, and gives back what should take focus next:
-// the next card, else the one before, else the screen's heading.
+// the next card (its Open, or its Delete where a damaged save can't open), else the one before, else
+// the screen's heading.
 export async function collapseCard(item: HTMLElement): Promise<HTMLElement> {
   const list = item.parentElement;
   const neighbour = (
     item.nextElementSibling ?? item.previousElementSibling
-  )?.querySelector<HTMLElement>(".save-open");
+  )?.querySelector<HTMLElement>(".save-open:enabled, .save-delete"); // a damaged save's Open is disabled
   if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
     item.style.overflow = "hidden";
     await item
