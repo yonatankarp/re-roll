@@ -1,0 +1,158 @@
+- id: srd52:feature/blessed-strikes
+  name: Blessed Strikes
+  text: Divine power infuses you in battle. You gain one of the following options of your choice (if you get either option from a Cleric subclass in an older book, use only the option you choose for this feature). Divine Strike. Once on each of your turns when you hit a creature with an attack roll using a weapon, you can cause the target to take an extra 1d8 Necrotic or Radiant damage (your choice). Potent Spellcasting. Add your Wisdom modifier to the damage you deal with any Cleric cantrip.
+  automation: full
+  variants:
+    - id: divine-strike
+      name: Divine Strike
+      passives:
+        - kind: extraDamage
+          dice: 1d8
+          types:
+            - necrotic
+            - radiant
+          when: always
+          with: weapon
+          oncePerTurn: true
+          ownTurn: true
+    - id: potent-spellcasting
+      name: Potent Spellcasting
+      passives:
+        - kind: cantripRider
+          list: srd52:class/cleric
+          damage:
+            add:
+              - kind: abilityMod
+                ability: wis
+- id: srd52:feature/divine-intervention
+  name: Divine Intervention
+  text: You can call on your deity or pantheon to intervene on your behalf. As a Magic action, choose any Cleric spell of level 5 or lower that doesn’t require a Reaction to cast. As part of the same action, you cast that spell without expending a spell slot or needing Material components. You can’t use this feature again until you finish a Long Rest.
+  automation: full
+  resources:
+    - id: divine-intervention
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - label: Divine Intervention
+      cost:
+        - action
+        - resource: divine-intervention
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: copySpell
+            maxLevel: 5
+            classes:
+              - cleric
+            noReaction: true
+- id: srd52:feature/improved-blessed-strikes
+  name: Improved Blessed Strikes
+  text: The option you chose for Blessed Strikes grows more powerful. Divine Strike. The extra damage of your Divine Strike increases to 2d8. Potent Spellcasting. When you cast a Cleric cantrip and deal damage to a creature with it, you can give vitality to yourself or another creature within 60 feet of yourself, granting a number of Temporary Hit Points equal to twice your Wisdom modifier.
+  automation: partial
+  follows: srd52:feature/blessed-strikes
+  variants:
+    - id: divine-strike
+      name: Divine Strike
+      passives:
+        - kind: extraDamage
+          dice: 1d8
+          types:
+            - necrotic
+            - radiant
+          when: always
+          with: weapon
+          oncePerTurn: true
+          ownTurn: true
+    - id: potent-spellcasting
+      name: Potent Spellcasting
+      passives:
+        - kind: cantripRider
+          list: srd52:class/cleric
+          selfEffects:
+            - kind: tempHp
+              amount:
+                bonus:
+                  add:
+                    - kind: abilityMod
+                      ability: wis
+                    - kind: abilityMod
+                      ability: wis
+- id: srd52:feature/greater-divine-intervention
+  name: Greater Divine Intervention
+  text: You can call on even more powerful divine intervention. When you use your Divine Intervention feature, you can choose Wish when you select a spell. If you do so, you can’t use Divine Intervention again until you finish 2d4 Long Rests.
+  automation: full
+  resources:
+    - id: greater-divine-intervention
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+          everyDie: 8
+  activations:
+    - label: Divine Intervention (Wish)
+      cost:
+        - action
+        - resource: divine-intervention
+        - resource: greater-divine-intervention
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: copySpell
+            maxLevel: 9
+            spells:
+              - srd52:spell/wish
+- id: srd52:feature/life-domain-spells
+  name: Life Domain Spells
+  text: |-
+    Your connection to this divine domain ensures you always have certain spells ready. When you reach a Cleric level specified in the Life Domain Spells table, you thereafter always have the listed spells prepared.
+
+    Life Domain Spells Cleric Level
+
+    Aid, Bless, Cure Wounds, Lesser Restoration
+
+    Greater Restoration, Mass Cure Wounds
+  automation: full
+  spells:
+    "3":
+      - srd52:spell/aid
+      - srd52:spell/bless
+      - srd52:spell/cure-wounds
+      - srd52:spell/lesser-restoration
+    "5":
+      - srd52:spell/mass-healing-word
+      - srd52:spell/revivify
+    "7":
+      - srd52:spell/aura-of-life
+      - srd52:spell/death-ward
+    "9":
+      - srd52:spell/greater-restoration
+      - srd52:spell/mass-cure-wounds
+- id: srd52:feature/blessed-healer
+  name: Blessed Healer
+  text: The healing spells you cast on others heal you as well. Immediately after you cast a spell with a spell slot that restores Hit Points to one or more creatures other than yourself, you regain Hit Points equal to 2 plus the spell slot’s level.
+  automation: full
+  passives:
+    - kind: castRider
+      heals: true
+      slot: true
+      effects:
+        - kind: heal
+          amount:
+            bonus:
+              base: 2
+              add:
+                - kind: slotLevel
+- id: srd52:feature/supreme-healing
+  name: Supreme Healing
+  text: When you would normally roll one or more dice to restore Hit Points to a creature with a spell or Channel Divinity, don’t roll those dice for the healing; instead use the highest number possible for each die. For example, instead of restoring 2d6 Hit Points to a creature with a spell, you restore 12.
+  automation: full
+  passives:
+    - kind: maxHealingDice

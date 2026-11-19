@@ -1,0 +1,305 @@
+- id: srd52:class/wizard
+  name: Wizard
+  hitDie: d6
+  primaryAbilities:
+    - int
+  savingThrows:
+    - int
+    - wis
+  weapons:
+    - simple
+  armor: []
+  spellcasting:
+    ability: int
+  swaps:
+    cantrips: longRest
+    spells: prepare
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/spellcasting
+        - srd52:feature/ritual-adept
+        - srd52:feature/arcane-recovery
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            - arcana
+            - history
+            - insight
+            - investigation
+            - medicine
+            - nature
+            - religion
+      slots:
+        - 2
+      scaling:
+        cantrips: 3
+        preparedSpells: 4
+    - level: 2
+      grants:
+        - srd52:feature/scholar
+      slots:
+        - 3
+      scaling:
+        cantrips: 3
+        preparedSpells: 5
+      choices:
+        - kind: skills
+          id: scholar
+          count: 1
+          from:
+            - arcana
+            - history
+            - investigation
+            - medicine
+            - nature
+            - religion
+          expertise: proficient
+    - level: 3
+      grants:
+        - srd52:feature/wizard-subclass
+      slots:
+        - 4
+        - 2
+      scaling:
+        cantrips: 3
+        preparedSpells: 6
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+      scaling:
+        cantrips: 4
+        preparedSpells: 7
+    - level: 5
+      grants:
+        - srd52:feature/memorize-spell
+      slots:
+        - 4
+        - 3
+        - 2
+      scaling:
+        cantrips: 4
+        preparedSpells: 9
+    - level: 6
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+      scaling:
+        cantrips: 4
+        preparedSpells: 10
+    - level: 7
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 1
+      scaling:
+        cantrips: 4
+        preparedSpells: 11
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 2
+      scaling:
+        cantrips: 4
+        preparedSpells: 12
+    - level: 9
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 1
+      scaling:
+        cantrips: 4
+        preparedSpells: 14
+    - level: 10
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+      scaling:
+        cantrips: 5
+        preparedSpells: 15
+    - level: 11
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+      scaling:
+        cantrips: 5
+        preparedSpells: 16
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+      scaling:
+        cantrips: 5
+        preparedSpells: 16
+    - level: 13
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+      scaling:
+        cantrips: 5
+        preparedSpells: 17
+    - level: 14
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+      scaling:
+        cantrips: 5
+        preparedSpells: 18
+    - level: 15
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        cantrips: 5
+        preparedSpells: 19
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        cantrips: 5
+        preparedSpells: 21
+    - level: 17
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+        - 1
+      scaling:
+        cantrips: 5
+        preparedSpells: 22
+    - level: 18
+      grants:
+        - srd52:feature/spell-mastery
+      choices:
+        - kind: spells
+          id: spell-mastery-1
+          count: 1
+          minLevel: 1
+          maxLevel: 1
+          list: srd52:class/wizard
+          freeCast: atWill
+        - kind: spells
+          id: spell-mastery-2
+          count: 1
+          minLevel: 2
+          maxLevel: 2
+          list: srd52:class/wizard
+          freeCast: atWill
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 1
+        - 1
+        - 1
+        - 1
+      scaling:
+        cantrips: 5
+        preparedSpells: 23
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        cantrips: 5
+        preparedSpells: 24
+    - level: 20
+      grants:
+        - srd52:feature/signature-spells
+      choices:
+        - kind: spells
+          id: signature-spells
+          count: 2
+          minLevel: 3
+          maxLevel: 3
+          list: srd52:class/wizard
+          freeCast: shortRest
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 2
+        - 2
+        - 1
+        - 1
+      scaling:
+        cantrips: 5
+        preparedSpells: 25

@@ -1,0 +1,353 @@
+- id: srd52:class/bard
+  name: Bard
+  hitDie: d8
+  primaryAbilities:
+    - cha
+  savingThrows:
+    - dex
+    - cha
+  weapons:
+    - simple
+  armor:
+    - light
+  spellcasting:
+    ability: cha
+  swaps:
+    cantrips: levelUp
+    spells: levelUp
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/bardic-inspiration
+        - srd52:feature/spellcasting
+      choices:
+        - kind: skills
+          id: skills
+          count: 3
+          from:
+            - acrobatics
+            - animalHandling
+            - arcana
+            - athletics
+            - deception
+            - history
+            - insight
+            - intimidation
+            - investigation
+            - medicine
+            - nature
+            - perception
+            - performance
+            - persuasion
+            - religion
+            - sleightOfHand
+            - stealth
+            - survival
+      slots:
+        - 2
+      scaling:
+        bardicDie: 6
+        cantrips: 2
+        preparedSpells: 4
+    - level: 2
+      grants:
+        - srd52:feature/expertise
+        - srd52:feature/jack-of-all-trades
+      slots:
+        - 3
+      scaling:
+        bardicDie: 6
+        cantrips: 2
+        preparedSpells: 5
+      choices:
+        - kind: skills
+          id: expertise
+          count: 2
+          from:
+            - acrobatics
+            - animalHandling
+            - arcana
+            - athletics
+            - deception
+            - history
+            - insight
+            - intimidation
+            - investigation
+            - medicine
+            - nature
+            - perception
+            - performance
+            - persuasion
+            - religion
+            - sleightOfHand
+            - stealth
+            - survival
+          expertise: proficient
+    - level: 3
+      grants:
+        - srd52:feature/bard-subclass
+      slots:
+        - 4
+        - 2
+      scaling:
+        bardicDie: 6
+        cantrips: 2
+        preparedSpells: 6
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+      scaling:
+        bardicDie: 6
+        cantrips: 3
+        preparedSpells: 7
+    - level: 5
+      grants:
+        - srd52:feature/font-of-inspiration
+      slots:
+        - 4
+        - 3
+        - 2
+      scaling:
+        bardicDie: 8
+        cantrips: 3
+        preparedSpells: 9
+    - level: 6
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+      scaling:
+        bardicDie: 8
+        cantrips: 3
+        preparedSpells: 10
+    - level: 7
+      grants:
+        - srd52:feature/countercharm
+      slots:
+        - 4
+        - 3
+        - 3
+        - 1
+      scaling:
+        bardicDie: 8
+        cantrips: 3
+        preparedSpells: 11
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 2
+      scaling:
+        bardicDie: 8
+        cantrips: 3
+        preparedSpells: 12
+    - level: 9
+      grants:
+        - srd52:feature/expertise
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 1
+      scaling:
+        bardicDie: 8
+        cantrips: 3
+        preparedSpells: 14
+      choices:
+        - kind: skills
+          id: expertise
+          count: 2
+          from:
+            - acrobatics
+            - animalHandling
+            - arcana
+            - athletics
+            - deception
+            - history
+            - insight
+            - intimidation
+            - investigation
+            - medicine
+            - nature
+            - perception
+            - performance
+            - persuasion
+            - religion
+            - sleightOfHand
+            - stealth
+            - survival
+          expertise: proficient
+    - level: 10
+      grants:
+        - srd52:feature/magical-secrets
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+      scaling:
+        bardicDie: 10
+        cantrips: 4
+        preparedSpells: 15
+    - level: 11
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+      scaling:
+        bardicDie: 10
+        cantrips: 4
+        preparedSpells: 16
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+      scaling:
+        bardicDie: 10
+        cantrips: 4
+        preparedSpells: 16
+    - level: 13
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+      scaling:
+        bardicDie: 10
+        cantrips: 4
+        preparedSpells: 17
+    - level: 14
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+      scaling:
+        bardicDie: 10
+        cantrips: 4
+        preparedSpells: 17
+    - level: 15
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        bardicDie: 12
+        cantrips: 4
+        preparedSpells: 18
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        bardicDie: 12
+        cantrips: 4
+        preparedSpells: 18
+    - level: 17
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+        - 1
+      scaling:
+        bardicDie: 12
+        cantrips: 4
+        preparedSpells: 19
+    - level: 18
+      grants:
+        - srd52:feature/superior-inspiration
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 1
+        - 1
+        - 1
+        - 1
+      scaling:
+        bardicDie: 12
+        cantrips: 4
+        preparedSpells: 20
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        bardicDie: 12
+        cantrips: 4
+        preparedSpells: 21
+    - level: 20
+      grants:
+        - srd52:feature/words-of-creation
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 2
+        - 2
+        - 1
+        - 1
+      scaling:
+        bardicDie: 12
+        cantrips: 4
+        preparedSpells: 22

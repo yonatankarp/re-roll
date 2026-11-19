@@ -1,0 +1,16 @@
+- id: srd52:subclass/path-of-the-berserker
+  name: Path of the Berserker
+  class: srd52:class/barbarian
+  levels:
+    - level: 3
+      grants:
+        - srd52:feature/frenzy
+    - level: 6
+      grants:
+        - srd52:feature/mindless-rage
+    - level: 10
+      grants:
+        - srd52:feature/retaliation
+    - level: 14
+      grants:
+        - srd52:feature/intimidating-presence

@@ -1,0 +1,190 @@
+- id: srd52:class/monk
+  name: Monk
+  hitDie: d8
+  primaryAbilities:
+    - dex
+    - wis
+  savingThrows:
+    - str
+    - dex
+  weapons:
+    - simple
+    - martial
+  martialWeaponProperties:
+    - light
+  armor: []
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/martial-arts
+        - srd52:feature/monk-unarmored-defense
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            - acrobatics
+            - athletics
+            - history
+            - insight
+            - religion
+            - stealth
+      slots: []
+      scaling:
+        martialArtsDie: 6
+    - level: 2
+      grants:
+        - srd52:feature/monk-s-focus
+        - srd52:feature/unarmored-movement
+        - srd52:feature/uncanny-metabolism
+      slots: []
+      scaling:
+        martialArtsDie: 6
+        focusPoints: 2
+        unarmoredMovement: 10
+    - level: 3
+      grants:
+        - srd52:feature/deflect-attacks
+        - srd52:feature/monk-subclass
+      slots: []
+      scaling:
+        martialArtsDie: 6
+        focusPoints: 3
+        unarmoredMovement: 10
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+        - srd52:feature/slow-fall
+      slots: []
+      scaling:
+        martialArtsDie: 6
+        focusPoints: 4
+        unarmoredMovement: 10
+    - level: 5
+      grants:
+        - srd52:feature/extra-attack
+        - srd52:feature/stunning-strike
+      slots: []
+      scaling:
+        martialArtsDie: 8
+        focusPoints: 5
+        unarmoredMovement: 10
+    - level: 6
+      grants:
+        - srd52:feature/empowered-strikes
+      slots: []
+      scaling:
+        martialArtsDie: 8
+        focusPoints: 6
+        unarmoredMovement: 15
+    - level: 7
+      grants:
+        - srd52:feature/evasion
+      slots: []
+      scaling:
+        martialArtsDie: 8
+        focusPoints: 7
+        unarmoredMovement: 15
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        martialArtsDie: 8
+        focusPoints: 8
+        unarmoredMovement: 15
+    - level: 9
+      grants:
+        - srd52:feature/acrobatic-movement
+      slots: []
+      scaling:
+        martialArtsDie: 8
+        focusPoints: 9
+        unarmoredMovement: 15
+    - level: 10
+      grants:
+        - srd52:feature/heightened-focus
+        - srd52:feature/self-restoration
+      slots: []
+      scaling:
+        martialArtsDie: 8
+        focusPoints: 10
+        unarmoredMovement: 20
+    - level: 11
+      grants: []
+      slots: []
+      scaling:
+        martialArtsDie: 10
+        focusPoints: 11
+        unarmoredMovement: 20
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        martialArtsDie: 10
+        focusPoints: 12
+        unarmoredMovement: 20
+    - level: 13
+      grants:
+        - srd52:feature/deflect-energy
+      slots: []
+      scaling:
+        martialArtsDie: 10
+        focusPoints: 13
+        unarmoredMovement: 20
+    - level: 14
+      grants:
+        - srd52:feature/disciplined-survivor
+      slots: []
+      scaling:
+        martialArtsDie: 10
+        focusPoints: 14
+        unarmoredMovement: 25
+    - level: 15
+      grants:
+        - srd52:feature/perfect-focus
+      slots: []
+      scaling:
+        martialArtsDie: 10
+        focusPoints: 15
+        unarmoredMovement: 25
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        martialArtsDie: 10
+        focusPoints: 16
+        unarmoredMovement: 25
+    - level: 17
+      grants: []
+      slots: []
+      scaling:
+        martialArtsDie: 12
+        focusPoints: 17
+        unarmoredMovement: 25
+    - level: 18
+      grants:
+        - srd52:feature/superior-defense
+      slots: []
+      scaling:
+        martialArtsDie: 12
+        focusPoints: 18
+        unarmoredMovement: 30
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots: []
+      scaling:
+        martialArtsDie: 12
+        focusPoints: 19
+        unarmoredMovement: 30
+    - level: 20
+      grants:
+        - srd52:feature/body-and-mind
+      slots: []
+      scaling:
+        martialArtsDie: 12
+        focusPoints: 20
+        unarmoredMovement: 30
