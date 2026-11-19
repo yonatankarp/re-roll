@@ -1,0 +1,447 @@
+- id: srd52:feature/lay-on-hands
+  name: Lay On Hands
+  text: |-
+    Your blessed touch can heal wounds. You have a pool of healing power that replenishes when you finish a Long Rest. With that pool, you can restore a total number of Hit Points equal to five times your Paladin level.
+
+    As a Bonus Action, you can touch a creature (which could be yourself) and draw power from the pool of healing to restore a number of Hit Points to that creature, up to the maximum amount remaining in the pool. You can also expend 5 Hit Points from the pool of healing power to remove the Poisoned condition from the creature; those points don’t also restore Hit Points to the creature.
+  automation: full
+  resources:
+    - id: lay-on-hands
+      max:
+        base: 0
+        add:
+          - kind: classLevel
+            class: srd52:class/paladin
+            times: 5
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - bonusAction
+      targeting:
+        creatures: 1
+        range: touch
+        side: ally
+      resolution:
+        kind: automatic
+        effects:
+          - kind: heal
+            amount:
+              bonus:
+                base: 1
+            pool:
+              resource: lay-on-hands
+    - cost:
+        - bonusAction
+        - resource: lay-on-hands
+          count: 5
+      targeting:
+        creatures: 1
+        range: touch
+        side: ally
+      resolution:
+        kind: automatic
+        effects:
+          - kind: removeCondition
+            condition: poisoned
+- id: srd52:feature/paladin-fighting-style
+  name: Fighting Style
+  text: You gain a Fighting Style feat of your choice (see “Feats” for feats). Instead of choosing one of those feats, you can choose the option below. Blessed Warrior. You learn two Cleric cantrips of your choice (see the Cleric class’s section for a list of Cleric spells). Guidance and Sacred Flame are recommended. The chosen cantrips count as Paladin spells for you, and Charisma is your spellcasting ability for them. Whenever you gain a Paladin level, you can replace one of these cantrips with another Cleric cantrip.
+  automation: full
+  variants:
+    - id: feat
+      name: Fighting Style feat
+      choices:
+        - kind: feat
+          id: fighting-style
+          category: fightingStyle
+    - id: blessed-warrior
+      name: Blessed Warrior
+      choices:
+        - kind: spells
+          id: cantrips
+          count: 2
+          maxLevel: 0
+          list: srd52:class/cleric
+          ability: cha
+          swap: levelUp
+- id: srd52:feature/paladin-s-smite
+  name: Paladin’s Smite
+  text: You always have the Divine Smite spell prepared. In addition, you can cast it without expending a spell slot, but you must finish a Long Rest before you can cast it in this way again.
+  automation: full
+  spells:
+    "2":
+      - srd52:spell/divine-smite
+  freeCast: true
+- id: srd52:feature/paladin-channel-divinity
+  name: Channel Divinity
+  text: |-
+    You can channel divine energy directly from the Outer Planes, using it to fuel magical effects. You start with one such effect: Divine Sense, which is described below. Other Paladin features give additional Channel Divinity effect options. Each time you use this class’s Channel Divinity, you choose which effect from this class to create. You can use this class’s Channel Divinity twice. You regain one of its expended uses when you finish a Short Rest, and you regain all expended uses when you finish a Long Rest. You gain an additional use when you reach Paladin level 11.
+
+    A Paladin tries to hold to the highest standards of conduct, but even the most dedicated are fallible. Sometimes a Paladin transgresses their oath. A Paladin who has broken a vow typically seeks absolution, spending an all-night vigil as a sign of penitence or undertaking a fast. After a rite of forgiveness, the Paladin starts fresh. If your Paladin unrepentantly violates their oath, talk to your GM. Your Paladin should probably take a more appropriate subclass or even abandon the class and adopt another one.
+
+    If a Channel Divinity effect requires a saving throw, the DC equals the spell save DC from this class’s Spellcasting feature. Divine Sense. As a Bonus Action, you can open your awareness to detect Celestials, Fiends, and Undead. For the next 10 minutes or until you have the Incapacitated condition, you know the location of any creature of those types within 60 feet of yourself, and you know its creature type. Within the same radius, you also detect the presence of any place or object that has been consecrated or desecrated, as with the Hallow spell.
+  automation: full
+  resources:
+    - id: paladin-channel-divinity
+      max:
+        base: 0
+        add:
+          - kind: scaling
+            key: channelDivinity
+      recharge:
+        - on: shortRest
+          amount: 1
+        - on: longRest
+          amount: all
+  activations:
+    - label: Divine Sense
+      cost:
+        - bonusAction
+        - resource: paladin-channel-divinity
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier:
+              kind: sceneAid
+              about:
+                - hidden
+              aid: advantage
+              once: true
+            duration:
+              minutes: 10
+- id: srd52:feature/paladin-subclass
+  name: Paladin Subclass
+  text: You gain a Paladin subclass of your choice. The Oath of Devotion subclass is detailed after this class’s description. A subclass is a specialization that grants you features at certain Paladin levels. For the rest of your career, you gain each of your subclass’s features that are of your Paladin level or lower.
+  automation: full
+- id: srd52:feature/faithful-steed
+  name: Faithful Steed
+  text: You can call on the aid of an otherworldly steed. You always have the Find Steed spell prepared. You can also cast the spell once without expending a spell slot, and you regain the ability to do so when you finish a Long Rest.
+  automation: full
+  spells:
+    "1":
+      - srd52:spell/find-steed
+  freeCast: true
+- id: srd52:feature/aura-of-protection
+  name: Aura of Protection
+  text: You radiate a protective, unseeable aura in a 10-foot Emanation that originates from you. The aura is inactive while you have the Incapacitated condition. You and your allies in the aura gain a bonus to saving throws equal to your Charisma modifier (minimum bonus of +1). If another Paladin is present, a creature can benefit from only one Aura of Protection at a time; the creature chooses which aura while in them.
+  automation: full
+  passives:
+    - kind: aura
+      name: Aura of Protection
+      radius: 10
+      wider:
+        class: paladin
+        level: 18
+        radius: 30
+      area:
+        side: ally
+        self: true
+        awake: true
+        grants:
+          - kind: bonus
+            to: saves
+            amount:
+              bonus:
+                add:
+                  - kind: abilityMod
+                    ability: cha
+                min: 1
+- id: srd52:feature/abjure-foes
+  name: Abjure Foes
+  text: |-
+    As a Magic action, you can expend one use of this class’s Channel Divinity to overwhelm foes with awe. As you present your Holy Symbol or weapon, you can target a number of creatures equal to your
+
+    Charisma modifier (minimum of one creature) that you can see within 60 feet of yourself. Each target must succeed on a Wisdom saving throw or have the Frightened condition for 1 minute or until it takes any damage. While Frightened in this way, a target can do only one of the following on its turns: move, take an action, or take a Bonus Action.
+  automation: full
+  activations:
+    - cost:
+        - action
+        - resource: paladin-channel-divinity
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+        creaturesBy: cha
+      resolution:
+        kind: save
+        ability: wis
+        dc:
+          base: 0
+          add:
+            - kind: spellSaveDc
+        damage: []
+        onSuccessDamage: none
+        onFail:
+          - kind: applyCondition
+            condition: frightened
+            duration:
+              minutes: 1
+            endsOnDamage: true
+          - kind: modifier
+            modifier:
+              kind: actionLimit
+              oneThing: true
+            duration:
+              minutes: 1
+            endsOnDamage: true
+        onSuccess: []
+- id: srd52:feature/aura-of-courage
+  name: Aura of Courage
+  text: You and your allies have Immunity to the Frightened condition while in your Aura of Protection. If a Frightened ally enters the aura, that condition has no effect on that ally while there.
+  automation: full
+  passives:
+    - kind: aura
+      name: Aura of Courage
+      radius: 10
+      wider:
+        class: paladin
+        level: 18
+        radius: 30
+      area:
+        side: ally
+        self: true
+        awake: true
+        grants:
+          - kind: conditionImmunity
+            condition: frightened
+- id: srd52:feature/radiant-strikes
+  name: Radiant Strikes
+  text: Your strikes now carry supernatural power. When you hit a target with an attack roll using a Melee weapon or an Unarmed Strike, the target takes an extra 1d8 Radiant damage.
+  automation: full
+  passives:
+    - kind: extraDamage
+      dice: 1d8
+      type: radiant
+      when: always
+      with: meleeWeapon
+- id: srd52:feature/restoring-touch
+  name: Restoring Touch
+  text: "When you use Lay On Hands on a creature, you can also remove one or more of the following conditions from the creature: Blinded, Charmed, Deafened, Frightened, Paralyzed, or Stunned. You must expend 5 Hit Points from the healing pool of Lay On Hands for each of these conditions you remove; those points don’t also restore Hit Points to the creature."
+  automation: full
+  activations:
+    - cost:
+        - bonusAction
+      targeting:
+        creatures: 1
+        range: touch
+        side: ally
+      resolution:
+        kind: automatic
+        effects:
+          - kind: cure
+            conditions:
+              - blinded
+              - charmed
+              - deafened
+              - frightened
+              - paralyzed
+              - stunned
+            pool:
+              resource: lay-on-hands
+              per: 5
+- id: srd52:feature/aura-expansion
+  name: Aura Expansion
+  text: Your Aura of Protection is now a 30-foot Emanation.
+  automation: full
+- id: srd52:feature/oath-of-devotion-spells
+  name: Oath of Devotion Spells
+  text: |-
+    The magic of your oath ensures you always have certain spells ready; when you reach a Paladin level specified in the Oath of Devotion Spells table, you thereafter always have the listed spells prepared.
+
+    Oath of Devotion Spells Paladin Level
+
+    Protection from Evil and Good, Shield of Faith
+
+    Freedom of Movement, Guardian of Faith
+  automation: full
+  spells:
+    "3":
+      - srd52:spell/protection-from-evil-and-good
+      - srd52:spell/shield-of-faith
+    "5":
+      - srd52:spell/aid
+      - srd52:spell/zone-of-truth
+    "9":
+      - srd52:spell/beacon-of-hope
+      - srd52:spell/dispel-magic
+    "13":
+      - srd52:spell/freedom-of-movement
+      - srd52:spell/guardian-of-faith
+    "17":
+      - srd52:spell/commune
+      - srd52:spell/flame-strike
+- id: srd52:feature/sacred-weapon
+  name: Sacred Weapon
+  text: When you take the Attack action, you can expend one use of your Channel Divinity to imbue one Melee weapon that you are holding with positive energy. For 10 minutes or until you use this feature again, you add your Charisma modifier to attack rolls you make with that weapon (minimum bonus of +1), and each time you hit with it, you cause it to deal its normal damage type or Radiant damage. The weapon also emits Bright Light in a 20-foot radius and Dim Light 20 feet beyond that. You can end this effect early (no action required). This effect also ends if you aren’t carrying the weapon.
+  automation: full
+  activations:
+    - cost:
+        - resource: paladin-channel-divinity
+      withAttack: true
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: zone
+            zone: light
+            radius: 20
+            follows: true
+            duration:
+              minutes: 10
+  passives:
+    - kind: weaponRider
+      with: heldMelee
+      types:
+        - radiant
+      attackMod: cha
+      while:
+        - srd52:feature/sacred-weapon
+- id: srd52:feature/aura-of-devotion
+  name: Aura of Devotion
+  text: You and your allies have Immunity to the Charmed condition while in your Aura of Protection. If a Charmed ally enters the aura, that condition has no effect on that ally while there.
+  automation: full
+  passives:
+    - kind: aura
+      name: Aura of Devotion
+      radius: 10
+      wider:
+        class: paladin
+        level: 18
+        radius: 30
+      area:
+        side: ally
+        self: true
+        awake: true
+        grants:
+          - kind: conditionImmunity
+            condition: charmed
+- id: srd52:feature/smite-of-protection
+  name: Smite of Protection
+  text: Your magical smite now radiates protective energy. Whenever you cast Divine Smite, you and your allies have Half Cover while in your Aura of Protection. The aura has this benefit until the start of your next turn.
+  automation: full
+  passives:
+    - kind: castRider
+      uses:
+        - srd52:spell/divine-smite
+        - srd52:spell/divine-smite
+      effects:
+        - kind: modifier
+          modifier:
+            kind: aspect
+            name: smite-of-protection
+          duration:
+            until: yourNextTurnStart
+    - kind: aura
+      name: Smite of Protection
+      whileAspect: smite-of-protection
+      radius: 10
+      wider:
+        class: paladin
+        level: 18
+        radius: 30
+      area:
+        side: ally
+        self: true
+        awake: true
+        grants:
+          - kind: halfCover
+- id: srd52:feature/holy-nimbus
+  name: Holy Nimbus
+  text: |-
+    As a Bonus Action, you can imbue your Aura of Protection with holy power, granting the benefits below for 10 minutes or until you end them (no action required). Once you use this feature, you can’t use it again until you finish a Long Rest. You can also restore your use of it by expending a level 5 spell slot (no action required). Holy Ward. You have Advantage on any saving throw you are forced to make by a Fiend or an Undead. Radiant Damage. Whenever an enemy starts its turn in the aura, that creature takes Radiant damage equal to your Charisma modifier plus your Proficiency Bonus. Sunlight. The aura is filled with Bright Light that is sunlight.
+
+    Ranger Core Ranger Traits Primary Ability
+
+    Choose 3: Animal Handling, Athletics, Insight, Investigation, Nature, Perception, Stealth, or Survival
+
+    Weapon Proficiencies Simple and Martial weapons Armor Training
+
+    Light and Medium armor and Shields
+
+    Choose A or B: (A) Studded Leather Armor, Scimitar, Shortsword, Longbow, 20 Arrows, Quiver, Druidic Focus (sprig of mistletoe), Explorer’s Pack, and 7 GP; or (B) 150 GP
+
+    Becoming a Ranger … As a Level 1 Character • Gain all the traits in the Core Ranger Traits table. • Gain the Ranger’s level 1 features, which are listed in the Ranger Features table.
+
+    • Gain the following traits from the Core Ranger Traits table: Hit Point Die, proficiency with Martial weapons, proficiency in one skill of your choice from the Ranger’s skill list, and training with Light and Medium armor and Shields. • Gain the Ranger’s level 1 features, which are listed in the Ranger Features table. See the multiclassing rules in “Character Creation” to determine your available spell slots.
+
+    As a Ranger, you gain the following class features when you reach the specified Ranger levels. These features are listed in the Ranger Features table.
+  automation: full
+  resources:
+    - id: holy-nimbus
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - bonusAction
+        - resource: holy-nimbus
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier:
+              kind: aspect
+              name: holy-nimbus
+            duration:
+              minutes: 10
+    - label: Level 5 slot
+      cost:
+        - bonusAction
+        - slot
+      minSlot: 5
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier:
+              kind: aspect
+              name: holy-nimbus
+            duration:
+              minutes: 10
+  whileActive:
+    features:
+      - srd52:feature/holy-nimbus
+    passives:
+      - kind: saveAdvantage
+        from:
+          creatureTypes:
+            - fiend
+            - undead
+  passives:
+    - kind: aura
+      name: Holy Nimbus
+      while:
+        - srd52:feature/holy-nimbus
+      zone: sunlight
+      radius: 10
+      wider:
+        class: paladin
+        level: 18
+        radius: 30
+      area:
+        side: enemy
+        awake: true
+        when: turnStart
+        resolution:
+          kind: automatic
+          damage:
+            - amount:
+                bonus:
+                  add:
+                    - kind: abilityMod
+                      ability: cha
+                    - kind: proficiency
+              type: radiant
+          effects: []

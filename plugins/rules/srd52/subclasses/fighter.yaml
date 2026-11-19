@@ -1,0 +1,24 @@
+- id: srd52:subclass/champion
+  name: Champion
+  class: srd52:class/fighter
+  levels:
+    - level: 3
+      grants:
+        - srd52:feature/improved-critical
+        - srd52:feature/remarkable-athlete
+    - level: 7
+      grants:
+        - srd52:feature/additional-fighting-style
+      choices:
+        - kind: feat
+          id: additional-fighting-style
+          category: fightingStyle
+    - level: 10
+      grants:
+        - srd52:feature/heroic-warrior
+    - level: 15
+      grants:
+        - srd52:feature/superior-critical
+    - level: 18
+      grants:
+        - srd52:feature/survivor

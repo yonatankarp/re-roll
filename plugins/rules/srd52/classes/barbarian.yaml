@@ -1,0 +1,217 @@
+- id: srd52:class/barbarian
+  name: Barbarian
+  hitDie: d12
+  primaryAbilities:
+    - str
+  savingThrows:
+    - str
+    - con
+  weapons:
+    - simple
+    - martial
+  armor:
+    - light
+    - medium
+    - shield
+  swaps:
+    weaponMastery: longRest
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/rage
+        - srd52:feature/unarmored-defense
+        - srd52:feature/weapon-mastery
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            - animalHandling
+            - athletics
+            - intimidation
+            - nature
+            - perception
+            - survival
+        - kind: weaponMastery
+          id: weapon-mastery
+          count: 2
+          melee: true
+      slots: []
+      scaling:
+        rages: 2
+        rageDamage: 2
+        weaponMastery: 2
+    - level: 2
+      grants:
+        - srd52:feature/danger-sense
+        - srd52:feature/reckless-attack
+      slots: []
+      scaling:
+        rages: 2
+        rageDamage: 2
+        weaponMastery: 2
+    - level: 3
+      grants:
+        - srd52:feature/barbarian-subclass
+        - srd52:feature/primal-knowledge
+      slots: []
+      scaling:
+        rages: 3
+        rageDamage: 2
+        weaponMastery: 2
+      choices:
+        - kind: skills
+          id: primal-knowledge
+          count: 1
+          from:
+            - animalHandling
+            - athletics
+            - intimidation
+            - nature
+            - perception
+            - survival
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        rages: 3
+        rageDamage: 2
+        weaponMastery: 3
+      choices:
+        - kind: weaponMastery
+          id: weapon-mastery
+          count: 1
+          melee: true
+    - level: 5
+      grants:
+        - srd52:feature/extra-attack
+        - srd52:feature/fast-movement
+      slots: []
+      scaling:
+        rages: 3
+        rageDamage: 2
+        weaponMastery: 3
+    - level: 6
+      grants: []
+      slots: []
+      scaling:
+        rages: 4
+        rageDamage: 2
+        weaponMastery: 3
+    - level: 7
+      grants:
+        - srd52:feature/feral-instinct
+        - srd52:feature/instinctive-pounce
+      slots: []
+      scaling:
+        rages: 4
+        rageDamage: 2
+        weaponMastery: 3
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        rages: 4
+        rageDamage: 2
+        weaponMastery: 3
+    - level: 9
+      grants:
+        - srd52:feature/brutal-strike
+      slots: []
+      scaling:
+        rages: 4
+        rageDamage: 3
+        weaponMastery: 3
+    - level: 10
+      grants: []
+      slots: []
+      scaling:
+        rages: 4
+        rageDamage: 3
+        weaponMastery: 4
+      choices:
+        - kind: weaponMastery
+          id: weapon-mastery
+          count: 1
+          melee: true
+    - level: 11
+      grants:
+        - srd52:feature/relentless-rage
+      slots: []
+      scaling:
+        rages: 4
+        rageDamage: 3
+        weaponMastery: 4
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        rages: 5
+        rageDamage: 3
+        weaponMastery: 4
+    - level: 13
+      grants:
+        - srd52:feature/improved-brutal-strike
+      slots: []
+      scaling:
+        rages: 5
+        rageDamage: 3
+        weaponMastery: 4
+    - level: 14
+      grants: []
+      slots: []
+      scaling:
+        rages: 5
+        rageDamage: 3
+        weaponMastery: 4
+    - level: 15
+      grants:
+        - srd52:feature/persistent-rage
+      slots: []
+      scaling:
+        rages: 5
+        rageDamage: 3
+        weaponMastery: 4
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        rages: 5
+        rageDamage: 4
+        weaponMastery: 4
+    - level: 17
+      grants:
+        - srd52:feature/improved-brutal-strike-17
+      slots: []
+      scaling:
+        rages: 6
+        rageDamage: 4
+        weaponMastery: 4
+    - level: 18
+      grants:
+        - srd52:feature/indomitable-might
+      slots: []
+      scaling:
+        rages: 6
+        rageDamage: 4
+        weaponMastery: 4
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots: []
+      scaling:
+        rages: 6
+        rageDamage: 4
+        weaponMastery: 4
+    - level: 20
+      grants:
+        - srd52:feature/primal-champion
+      slots: []
+      scaling:
+        rages: 6
+        rageDamage: 4
+        weaponMastery: 4

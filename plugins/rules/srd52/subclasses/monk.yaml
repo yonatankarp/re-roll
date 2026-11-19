@@ -1,0 +1,16 @@
+- id: srd52:subclass/warrior-of-the-open-hand
+  name: Warrior of the Open Hand
+  class: srd52:class/monk
+  levels:
+    - level: 3
+      grants:
+        - srd52:feature/open-hand-technique
+    - level: 6
+      grants:
+        - srd52:feature/wholeness-of-body
+    - level: 11
+      grants:
+        - srd52:feature/fleet-step
+    - level: 17
+      grants:
+        - srd52:feature/quivering-palm

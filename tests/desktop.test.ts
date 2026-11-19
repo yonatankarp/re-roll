@@ -568,9 +568,9 @@ describe("playing through the shell's session", () => {
 
   it("tells a dead character from a fallen party and from a win", async () => {
     // One pinned seed per ending (#209). When the rules change what a seed does, pin another.
-    const pinned = { 3: "ending", 21: "died" };
+    const pinned = { 1: "ending", 14: "died" };
     const endings: Record<string, string> = {};
-    for (const seed of [3, 21]) {
+    for (const seed of [1, 14]) {
       const game = newGame();
       // On Normal the companions stabilize a dying Wizard, so a death is rare there.
       await game.start("goblin-ambush", `endings-${String(seed)}`, {

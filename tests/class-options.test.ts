@@ -158,7 +158,7 @@ const WARLOCK = [
   })),
   {
     id: "test:class/warlock",
-    name: "Warlock",
+    name: "Test Warlock", // apart from the SRD's Warlock, which would hide it in the class list
     hitDie: "d8",
     primaryAbilities: ["cha"],
     savingThrows: ["wis", "cha"],
@@ -385,7 +385,7 @@ const content = [
   },
   {
     id: "test:class/sorcerer",
-    name: "Sorcerer",
+    name: "Test Sorcerer", // apart from the SRD's Sorcerer, which a build names its class by
     hitDie: "d6",
     primaryAbilities: ["cha"],
     savingThrows: ["con", "cha"],

@@ -1,0 +1,303 @@
+- id: srd52:class/ranger
+  name: Ranger
+  hitDie: d10
+  primaryAbilities:
+    - dex
+    - wis
+  savingThrows:
+    - str
+    - dex
+  weapons:
+    - simple
+    - martial
+  armor:
+    - light
+    - medium
+    - shield
+  spellcasting:
+    ability: wis
+  swaps:
+    spells: longRest
+    weaponMastery: prepare
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/spellcasting
+        - srd52:feature/favored-enemy
+        - srd52:feature/weapon-mastery
+      choices:
+        - kind: skills
+          id: skills
+          count: 3
+          from:
+            - animalHandling
+            - athletics
+            - insight
+            - investigation
+            - nature
+            - perception
+            - stealth
+            - survival
+      slots:
+        - 2
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 2
+        preparedSpells: 2
+    - level: 2
+      grants:
+        - srd52:feature/deft-explorer
+        - srd52:feature/ranger-fighting-style
+      slots:
+        - 2
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 2
+        preparedSpells: 3
+      choices:
+        - kind: skills
+          id: deft-explorer
+          count: 1
+          from:
+            - acrobatics
+            - animalHandling
+            - arcana
+            - athletics
+            - deception
+            - history
+            - insight
+            - intimidation
+            - investigation
+            - medicine
+            - nature
+            - perception
+            - performance
+            - persuasion
+            - religion
+            - sleightOfHand
+            - stealth
+            - survival
+          expertise: proficient
+    - level: 3
+      grants:
+        - srd52:feature/ranger-subclass
+      slots:
+        - 3
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 2
+        preparedSpells: 4
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 3
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 2
+        preparedSpells: 5
+    - level: 5
+      grants:
+        - srd52:feature/extra-attack
+      slots:
+        - 4
+        - 2
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 3
+        preparedSpells: 6
+    - level: 6
+      grants:
+        - srd52:feature/roving
+      slots:
+        - 4
+        - 2
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 3
+        preparedSpells: 6
+    - level: 7
+      grants: []
+      slots:
+        - 4
+        - 3
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 3
+        preparedSpells: 7
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 3
+        preparedSpells: 7
+    - level: 9
+      grants:
+        - srd52:feature/expertise
+      slots:
+        - 4
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 4
+        preparedSpells: 9
+      choices:
+        - kind: skills
+          id: expertise
+          count: 2
+          from:
+            - acrobatics
+            - animalHandling
+            - arcana
+            - athletics
+            - deception
+            - history
+            - insight
+            - intimidation
+            - investigation
+            - medicine
+            - nature
+            - perception
+            - performance
+            - persuasion
+            - religion
+            - sleightOfHand
+            - stealth
+            - survival
+          expertise: proficient
+    - level: 10
+      grants:
+        - srd52:feature/tireless
+      slots:
+        - 4
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 4
+        preparedSpells: 9
+    - level: 11
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 4
+        preparedSpells: 10
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 4
+        preparedSpells: 10
+    - level: 13
+      grants:
+        - srd52:feature/relentless-hunter
+      slots:
+        - 4
+        - 3
+        - 3
+        - 1
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 5
+        preparedSpells: 11
+    - level: 14
+      grants:
+        - srd52:feature/nature-s-veil
+      slots:
+        - 4
+        - 3
+        - 3
+        - 1
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 5
+        preparedSpells: 11
+    - level: 15
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 5
+        preparedSpells: 12
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 5
+        preparedSpells: 12
+    - level: 17
+      grants:
+        - srd52:feature/precise-hunter
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 1
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 6
+        preparedSpells: 14
+    - level: 18
+      grants:
+        - srd52:feature/feral-senses
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 1
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 6
+        preparedSpells: 14
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 6
+        preparedSpells: 15
+    - level: 20
+      grants:
+        - srd52:feature/foe-slayer
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        favoredEnemy: 6
+        preparedSpells: 15

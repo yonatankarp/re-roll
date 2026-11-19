@@ -284,7 +284,7 @@
   automation: full
   resources:
     - id: action-surge
-      max: { base: 1 }
+      max: { base: 0, add: [{ kind: scaling, key: actionSurge }] }
       recharge: [{ on: shortRest, amount: all }, { on: longRest, amount: all }]
   activations:
     - cost: [{ resource: action-surge }]
@@ -456,6 +456,7 @@
           - kind: heal
             amount:
               dice: 1d8
+              diceCount: divineSpark
               bonus:
                 add:
                   - kind: abilityMod
@@ -478,6 +479,7 @@
         damage:
           - amount:
               dice: 1d8
+              diceCount: divineSpark
               bonus:
                 add:
                   - kind: abilityMod
@@ -502,6 +504,7 @@
         damage:
           - amount:
               dice: 1d8
+              diceCount: divineSpark
               bonus:
                 add:
                   - kind: abilityMod

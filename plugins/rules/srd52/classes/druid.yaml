@@ -1,0 +1,297 @@
+- id: srd52:class/druid
+  name: Druid
+  hitDie: d8
+  primaryAbilities:
+    - wis
+  savingThrows:
+    - int
+    - wis
+  weapons:
+    - simple
+  armor:
+    - light
+    - shield
+  spellcasting:
+    ability: wis
+  swaps:
+    cantrips: levelUp
+    spells: prepare
+  tools:
+    - srd52:item/herbalism-kit
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/spellcasting
+        - srd52:feature/druidic
+        - srd52:feature/primal-order
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            - arcana
+            - animalHandling
+            - insight
+            - medicine
+            - nature
+            - perception
+            - religion
+            - survival
+      slots:
+        - 2
+      scaling:
+        cantrips: 2
+        preparedSpells: 4
+    - level: 2
+      grants:
+        - srd52:feature/wild-shape
+        - srd52:feature/wild-companion
+      slots:
+        - 3
+      scaling:
+        wildShape: 2
+        cantrips: 2
+        preparedSpells: 5
+    - level: 3
+      grants:
+        - srd52:feature/druid-subclass
+      slots:
+        - 4
+        - 2
+      scaling:
+        wildShape: 2
+        cantrips: 2
+        preparedSpells: 6
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+      scaling:
+        wildShape: 2
+        cantrips: 3
+        preparedSpells: 7
+    - level: 5
+      grants:
+        - srd52:feature/wild-resurgence
+      slots:
+        - 4
+        - 3
+        - 2
+      scaling:
+        wildShape: 2
+        cantrips: 3
+        preparedSpells: 9
+    - level: 6
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+      scaling:
+        wildShape: 3
+        cantrips: 3
+        preparedSpells: 10
+    - level: 7
+      grants:
+        - srd52:feature/elemental-fury
+      slots:
+        - 4
+        - 3
+        - 3
+        - 1
+      scaling:
+        wildShape: 3
+        cantrips: 3
+        preparedSpells: 11
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 2
+      scaling:
+        wildShape: 3
+        cantrips: 3
+        preparedSpells: 12
+    - level: 9
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 1
+      scaling:
+        wildShape: 3
+        cantrips: 3
+        preparedSpells: 14
+    - level: 10
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+      scaling:
+        wildShape: 3
+        cantrips: 4
+        preparedSpells: 15
+    - level: 11
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+      scaling:
+        wildShape: 3
+        cantrips: 4
+        preparedSpells: 16
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+      scaling:
+        wildShape: 3
+        cantrips: 4
+        preparedSpells: 16
+    - level: 13
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+      scaling:
+        wildShape: 3
+        cantrips: 4
+        preparedSpells: 17
+    - level: 14
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+      scaling:
+        wildShape: 3
+        cantrips: 4
+        preparedSpells: 17
+    - level: 15
+      grants:
+        - srd52:feature/improved-elemental-fury
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        wildShape: 3
+        cantrips: 4
+        preparedSpells: 18
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        wildShape: 3
+        cantrips: 4
+        preparedSpells: 18
+    - level: 17
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+        - 1
+      scaling:
+        wildShape: 4
+        cantrips: 4
+        preparedSpells: 19
+    - level: 18
+      grants:
+        - srd52:feature/beast-spells
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 1
+        - 1
+        - 1
+        - 1
+      scaling:
+        wildShape: 4
+        cantrips: 4
+        preparedSpells: 20
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        wildShape: 4
+        cantrips: 4
+        preparedSpells: 21
+    - level: 20
+      grants:
+        - srd52:feature/archdruid
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 2
+        - 2
+        - 1
+        - 1
+      scaling:
+        wildShape: 4
+        cantrips: 4
+        preparedSpells: 22

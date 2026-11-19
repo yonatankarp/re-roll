@@ -1014,8 +1014,8 @@ describe("playing a D&D adventure", () => {
     const started = startRun(run, "choose");
     expect(started.pending?.id).toBe("dnd5.5e:chooseCharacter");
     expect(started.state.story.scene).toBeNull();
-    // Four pregens, making one step by step, a ready hero per class and building one on the sheet.
-    expect(started.pending?.options).toHaveLength(10);
+    // Four pregens, making one step by step, a ready hero for each of the SRD's 12 classes and building one on the sheet.
+    expect(started.pending?.options).toHaveLength(18);
     expect(started.pending?.options[4]?.id).toBe("create");
     expect(started.pending?.options.at(-1)?.id).toBe("build");
 
@@ -1075,7 +1075,7 @@ describe("playing a D&D adventure", () => {
   it("really fights: monsters take damage, and fights end in a win or a defeat", async () => {
     const run = await goblin();
     // One pinned seed per outcome (#209). The soak run plays all 120.
-    const pinned = { "fight-4": "win", "fight-13": "defeat" };
+    const pinned = { "fight-2": "win", "fight-38": "defeat" };
     const seeds = SOAK
       ? Array.from({ length: 120 }, (_, index) => `fight-${String(index)}`)
       : Object.keys(pinned);
@@ -1132,7 +1132,7 @@ describe("playing a D&D adventure", () => {
 
   it("clears monsters and the combat when a fight is won", async () => {
     const run = await goblin();
-    const played = playRun(run, "clear-1", { maxDecisions: 500 }); // a pinned seed that wins its fight (#209)
+    const played = playRun(run, "clear-2", { maxDecisions: 500 }); // a pinned seed that wins its fight (#209)
     const events = played.log.flatMap((entry) => entry.events);
     expect(
       played.outcome === "ending" &&
@@ -1148,7 +1148,7 @@ describe("playing a D&D adventure", () => {
 
   it("saves and resumes in the middle of a fight", async () => {
     const { registry, run } = await loadAdventure("goblin-ambush");
-    const seed = "mid-1"; // a pinned seed whose fight lasts more than one step (#209)
+    const seed = "mid-2"; // a pinned seed whose fight lasts more than one step (#209)
     const played = playRun(run, seed, { maxDecisions: 500 });
     const fighting = played.log.findIndex((entry) =>
       entry.events.some((event) => event.kind === "encounterStarted"),
@@ -1495,10 +1495,10 @@ describe("encounter outcomes in real fights", () => {
     const { run } = await outcomesRun();
     // One pinned seed per way out (#209). The soak run plays all 80.
     const pinned = {
-      "outcome-11": "road",
-      "outcome-1": "fled",
-      "outcome-6": "captured",
-      "outcome-10": "dead",
+      "outcome-17": "road",
+      "outcome-0": "fled",
+      "outcome-46": "captured",
+      "outcome-1": "dead",
     };
     const seeds = SOAK
       ? Array.from({ length: 80 }, (_, index) => `outcome-${String(index)}`)

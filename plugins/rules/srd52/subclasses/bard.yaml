@@ -1,0 +1,49 @@
+- id: srd52:subclass/college-of-lore
+  name: College of Lore
+  class: srd52:class/bard
+  levels:
+    - level: 3
+      grants:
+        - srd52:feature/bonus-proficiencies
+        - srd52:feature/cutting-words
+      choices:
+        - kind: skills
+          id: bonus-proficiencies
+          count: 3
+          from:
+            - acrobatics
+            - animalHandling
+            - arcana
+            - athletics
+            - deception
+            - history
+            - insight
+            - intimidation
+            - investigation
+            - medicine
+            - nature
+            - perception
+            - performance
+            - persuasion
+            - religion
+            - sleightOfHand
+            - stealth
+            - survival
+    - level: 6
+      grants:
+        - srd52:feature/magical-discoveries
+      choices:
+        - kind: spells
+          id: magical-discoveries
+          count: 2
+          maxLevel: 1
+          upToSlots: true
+          cantrips: true
+          list: srd52:class/cleric
+          lists:
+            - srd52:class/druid
+            - srd52:class/wizard
+          swap: levelUp
+    - level: 14
+      grants:
+        - srd52:feature/peerless-skill
