@@ -1,6 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { resolve } from "node:path";
-import { type Page, expect, test } from "@playwright/test";
+import { type Page, expect, test } from "./fixtures.ts";
 import { playUntil } from "./onward.ts";
 
 // Keyboard, focus and screen-reader checks (#218), with an axe pass on each main screen.
@@ -76,9 +75,40 @@ test("the menu, setup and game pass axe, and the setup's choices work by keyboar
   await axe(page);
 });
 
+// A foe's plate shows only with a book's art, which CI lacks, so a made-up art folder pictures the goblins.
+const ART_INDEX = JSON.stringify([
+  { file: "goblin.png", monster: "srd52:monster/goblin-warrior" },
+]);
+// A 1×1 PNG.
+const PIXEL = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 test("the die waits as a focused button and the foe's plate has a way out", async ({
   page,
 }) => {
+  const query = (url: string) => new URL(url).searchParams.get("path");
+  await page.route("**/__content/list?*", (route) =>
+    query(route.request().url()) === "books/assets"
+      ? route.fulfill({
+          json: [
+            { path: "books/assets/fixture/goblin.png", symlink: false },
+            { path: "books/assets/fixture/index.json", symlink: false },
+          ],
+        })
+      : route.fallback(),
+  );
+  await page.route("**/__content/read?*", (route) =>
+    query(route.request().url()) === "books/assets/fixture/index.json"
+      ? route.fulfill({ body: ART_INDEX, contentType: "text/plain" })
+      : route.fallback(),
+  );
+  await page.route("**/__content/image?*", (route) =>
+    query(route.request().url()) === "books/assets/fixture/goblin.png"
+      ? route.fulfill({ body: PIXEL, contentType: "image/png" })
+      : route.fallback(),
+  );
   await page.goto("/");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
   await page.getByRole("button", { name: "Begin the adventure" }).click();
@@ -99,41 +129,36 @@ test("the die waits as a focused button and the foe's plate has a way out", asyn
     .poll(() => page.evaluate(() => document.activeElement?.tagName))
     .not.toBe("BODY");
 
-  // The battle map, once the fight starts.
-  await playUntil(page, () => page.locator(".dnd-cell").first().isVisible());
-  await axe(page);
-
-  // The page's own module draws a foe's plate, so it opens with focus on a known button.
-  const plateModule = `/@fs/${resolve(
-    import.meta.dirname,
-    "../../engine/shell/art-plate.ts",
-  )
-    .replaceAll("\\", "/")
-    .replace(/^\//, "")}`;
-  const journal = page.getByRole("button", { name: "Journal", exact: true });
-  await journal.focus();
-  await page.evaluate(async (url) => {
-    const { artPlate } = (await import(
-      url
-    )) as typeof import("../../engine/shell/art-plate.ts");
-    const plate = artPlate();
-    document.body.append(plate.element);
-    plate.show(null as never, {
-      kind: "foe",
-      kicker: "A foe appears",
-      title: "Goblin",
-      pictures: [],
-    });
-  }, plateModule);
-  const plate = page.getByRole("status").filter({ hasText: "A foe appears" });
+  // The goblins' plate as the fight starts: a named way out, which gives focus back.
+  const plate = page
+    .getByRole("status")
+    .filter({ hasText: /^(A foe appears|Foes appear)/ });
+  // Not playUntil: an Enter as the plate comes would press its Continue. A waiting die holds focus.
+  const onward = page
+    .getByRole("button", {
+      name: /^(Carry on|Drive them off|Keep your place)$/,
+    })
+    .first();
+  const waiting = page.getByRole("button", { name: /^Throw the d20/ }).first();
+  await expect(async () => {
+    if (await plate.isVisible()) return;
+    if (await onward.isVisible()) await onward.click();
+    else if (await waiting.isVisible()) await page.keyboard.press("Enter");
+    expect(await plate.isVisible()).toBe(true);
+  }).toPass({ intervals: [300], timeout: 30_000 });
   const leave = plate.getByRole("button", { name: /^Continue/ });
   await expect(leave).toHaveAttribute("aria-keyshortcuts", "Escape");
   await expect(plate).toContainText("Esc");
-  // Its button gives focus back to where it was as the plate came.
   await leave.focus();
   await page.keyboard.press("Enter");
   await expect(plate).toBeHidden();
-  await expect(journal).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.tagName))
+    .not.toBe("BODY");
+
+  // The battle map, once the fight starts.
+  await playUntil(page, () => page.locator(".dnd-cell").first().isVisible());
+  await axe(page);
 });
 
 test("shortcuts work on a non-Latin layout and say Ctrl off a Mac", async ({

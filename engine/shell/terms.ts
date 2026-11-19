@@ -323,7 +323,13 @@ export function wireTerms(ctx: ShellContext): void {
     const term = termOf(event.target);
     if (returning) return;
     if (term?.tabIndex === 0) void show(term, { pin: false, focus: false });
-    else if (!pop.hidden && !pop.contains(event.target as Node)) hide();
+    // A press on More in macOS WebKit focuses the drawer around the answer, not the button: still inside.
+    else if (
+      !pop.hidden &&
+      !pop.contains(event.target as Node) &&
+      !(event.target as Node).contains(pop)
+    )
+      hide();
   });
   document.addEventListener(
     "keydown",

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.ts";
 import { playUntil } from "./onward.ts";
 
 // Explains a rules term in a fight from a made-up library, as the owner's books would, by hover,

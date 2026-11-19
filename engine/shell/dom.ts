@@ -41,12 +41,18 @@ export function confirmButton(
       node.textContent = `Really ${label.toLowerCase()}?`;
       node.classList.add("armed");
       node.setAttribute("aria-label", `Confirm ${label.toLowerCase()} ${name}`);
+      // WebKit doesn't focus a clicked button, and without focus Esc and leaving can't take it back.
+      node.focus();
       return;
     }
     onConfirm();
   });
   disarm();
   node.addEventListener("blur", disarm);
+  // Its own press mustn't blur it, as WebKit's mousedown does: the blur's new text loses the click.
+  node.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+  });
   node.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && armed) {
       event.stopPropagation();

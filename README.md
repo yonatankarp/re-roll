@@ -82,7 +82,7 @@ npm test
 npm run lint
 npm run typecheck   # four tsc projects, one per layer
 npm run format:check
-npm run test:ui     # a Playwright smoke test in Chromium
+npm run test:ui     # Playwright tests of the built game under the app's CSP, in Chromium and WebKit
 ```
 
 - `npm run play -- <adventure>` plays in the terminal, without the UI. With no arguments it lists the adventures. It saves to `saves/` in the current folder, or under `--saves=<dir>`. Section 12 of the design doc has its options and the scripted JSON mode.
