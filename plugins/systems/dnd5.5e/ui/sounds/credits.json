@@ -1,0 +1,154 @@
+[
+  {
+    "file": "fight-won.ogg",
+    "title": "jingles_PIZZI10 from Music Jingles",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/music-jingles",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "fight-start.ogg",
+    "title": "drawKnife1 from RPG Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "dice-1.ogg",
+    "title": "dice-throw-1 from Casino Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/casino-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "dice-2.ogg",
+    "title": "dice-throw-2 from Casino Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/casino-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "dice-3.ogg",
+    "title": "dice-throw-3 from Casino Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/casino-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "hit-1.ogg",
+    "title": "impactPunch_heavy_000 from Impact Sounds",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "hit-2.ogg",
+    "title": "impactPunch_heavy_001 from Impact Sounds",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "hit-3.ogg",
+    "title": "impactPunch_heavy_002 from Impact Sounds",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "critical.ogg",
+    "title": "impactPlate_heavy_000 from Impact Sounds",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "down.ogg",
+    "title": "dropLeather from RPG Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "step-1.ogg",
+    "title": "footstep00 from RPG Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "step-2.ogg",
+    "title": "footstep01 from RPG Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "step-3.ogg",
+    "title": "footstep02 from RPG Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "turn.ogg",
+    "title": "tick_002 from Interface Sounds",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/interface-sounds",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "status.ogg",
+    "title": "glass_002 from Interface Sounds",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/interface-sounds",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "resist.ogg",
+    "title": "impactMetal_heavy_000 from Impact Sounds",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "legendary.ogg",
+    "title": "impactBell_heavy_000 from Impact Sounds",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "lair.ogg",
+    "title": "impactMining_000 from Impact Sounds",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  },
+  {
+    "file": "coins.ogg",
+    "title": "handleCoins from RPG Audio",
+    "author": "Kenney (kenney.nl)",
+    "source": "https://kenney.nl/assets/rpg-audio",
+    "licence": "CC0-1.0",
+    "changes": "peak-normalised, re-encoded to mono Opus, with an AAC copy"
+  }
+]

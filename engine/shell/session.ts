@@ -23,7 +23,11 @@ import {
   loadSave,
 } from "../run/save.ts";
 import type { Storage } from "../kernel/storage.ts";
-import { type Ambience, sceneAmbience } from "../story/ambience.ts";
+import {
+  type Ambience,
+  placeAmbience,
+  sceneAmbience,
+} from "../story/ambience.ts";
 import { scenesAhead } from "../story/narration.ts";
 import {
   REST_OPTION_PREFIX,
@@ -1573,7 +1577,13 @@ export function createGame({
         title: run.adventure.title,
         scene: text,
         sceneTitle: currentScene ? sceneTitle(currentScene) : null,
-        ambience: sceneAmbience(currentScene?.ambience, text ?? ""),
+        ambience: sceneAmbience(
+          currentScene?.ambience,
+          text ?? "",
+          currentScene
+            ? placeAmbience(run.adventure).get(currentScene.id)
+            : undefined,
+        ),
         upcoming: scenesAhead(currentScene).flatMap((id) => {
           const next = run.adventure.scenes.find((item) => item.id === id);
           return next ? [sceneText(run, state, next)] : [];

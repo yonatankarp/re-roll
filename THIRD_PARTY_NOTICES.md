@@ -9,8 +9,44 @@ Re-roll is licensed under the GNU General Public License, version 3 or later (se
 - **eSpeak NG** (GPL-3.0-or-later), compiled into the narration worker through the `phonemizer` package, to turn text into phonemes for the narrator. Source: https://github.com/espeak-ng/espeak-ng
 - **Kokoro-82M** voice model and voices (Apache-2.0), downloaded on first use and verified by hash. Source: https://huggingface.co/hexgrad/Kokoro-82M
 - **Solbera's D&D 5e fonts** (CC BY-SA 4.0): Bookinsanity, Mr Eaves Small Caps, Nodesto Caps Condensed, Scaly Sans and Scaly Sans Caps, unchanged from https://github.com/jonathonf/solbera-dnd-fonts. Their licence is below.
+- **Music and sounds**: Kevin MacLeod's music from incompetech.com (CC BY 4.0) and Kenney's audio packs from kenney.nl (CC0 1.0), trimmed and re-encoded. Each file is listed under Music, sounds and art below, and the game's About credits them.
 - **System Reference Document 5.2** (CC BY 4.0) by Wizards of the Coast, the basis of `plugins/rules/srd52` and the shipped adventures' rules. See the attribution in that plugin.
 - **glib 0.18.5** (MIT) in `app/desktop/src-tauri/patches/glib-0.18.5`, with the GHSA-wrw7-89jp-8q8g fix from glib 0.20 backported, because Tauri's Linux GTK stack still pins glib 0.18.
+
+## Music, sounds and art
+
+Each file's credit, from the `credits.json` beside it (`engine/shell/sounds/credits.json`, `plugins/systems/dnd5.5e/ui/sounds/credits.json`). CC0 1.0 is at https://creativecommons.org/publicdomain/zero/1.0/, CC BY 3.0 at https://creativecommons.org/licenses/by/3.0/ and CC BY 4.0 at https://creativecommons.org/licenses/by/4.0/.
+
+| File | Title | Author | Licence | Source | Changes |
+| --- | --- | --- | --- | --- | --- |
+| engine/shell/sounds/music-explore.ogg | Suonatore di Liuto | Kevin MacLeod (incompetech.com) | CC-BY-4.0 | https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1400023 | the first 100 seconds, loudness-normalised and faded in and out, re-encoded to Opus, with an AAC copy |
+| engine/shell/sounds/music-tension.ogg | Gathering Darkness | Kevin MacLeod (incompetech.com) | CC-BY-4.0 | https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100849 | the first 100 seconds, loudness-normalised and faded in and out, re-encoded to Opus, with an AAC copy |
+| engine/shell/sounds/music-combat.ogg | Five Armies | Kevin MacLeod (incompetech.com) | CC-BY-4.0 | https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100875 | the first 100 seconds, loudness-normalised and faded in and out, re-encoded to Opus, with an AAC copy |
+| engine/shell/sounds/level-up.ogg | jingles_PIZZI02 from Music Jingles | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/music-jingles | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| engine/shell/sounds/victory.ogg | jingles_PIZZI12 from Music Jingles | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/music-jingles | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| engine/shell/sounds/defeat.ogg | jingles_PIZZI01 from Music Jingles | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/music-jingles | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| engine/shell/sounds/rest.ogg | jingles_PIZZI13 from Music Jingles | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/music-jingles | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| engine/shell/sounds/shop.ogg | handleCoins2 from RPG Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/rpg-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| engine/shell/sounds/page.ogg | bookFlip2 from RPG Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/rpg-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/fight-won.ogg | jingles_PIZZI10 from Music Jingles | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/music-jingles | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/fight-start.ogg | drawKnife1 from RPG Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/rpg-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/dice-1.ogg | dice-throw-1 from Casino Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/casino-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/dice-2.ogg | dice-throw-2 from Casino Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/casino-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/dice-3.ogg | dice-throw-3 from Casino Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/casino-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/hit-1.ogg | impactPunch_heavy_000 from Impact Sounds | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/impact-sounds | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/hit-2.ogg | impactPunch_heavy_001 from Impact Sounds | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/impact-sounds | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/hit-3.ogg | impactPunch_heavy_002 from Impact Sounds | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/impact-sounds | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/critical.ogg | impactPlate_heavy_000 from Impact Sounds | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/impact-sounds | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/down.ogg | dropLeather from RPG Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/rpg-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/step-1.ogg | footstep00 from RPG Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/rpg-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/step-2.ogg | footstep01 from RPG Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/rpg-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/step-3.ogg | footstep02 from RPG Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/rpg-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/turn.ogg | tick_002 from Interface Sounds | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/interface-sounds | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/status.ogg | glass_002 from Interface Sounds | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/interface-sounds | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/resist.ogg | impactMetal_heavy_000 from Impact Sounds | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/impact-sounds | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/legendary.ogg | impactBell_heavy_000 from Impact Sounds | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/impact-sounds | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/lair.ogg | impactMining_000 from Impact Sounds | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/impact-sounds | peak-normalised, re-encoded to mono Opus, with an AAC copy |
+| plugins/systems/dnd5.5e/ui/sounds/coins.ogg | handleCoins from RPG Audio | Kenney (kenney.nl) | CC0-1.0 | https://kenney.nl/assets/rpg-audio | peak-normalised, re-encoded to mono Opus, with an AAC copy |
 
 ## npm packages
 

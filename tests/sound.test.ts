@@ -5,7 +5,11 @@ import {
   saveSettings,
 } from "../engine/shell/sound-settings.ts";
 import { systems } from "../app/systems.ts";
-import { guessAmbience, sceneAmbience } from "../engine/story/ambience.ts";
+import {
+  guessAmbience,
+  placeAmbience,
+  sceneAmbience,
+} from "../engine/story/ambience.ts";
 import {
   type StoryFile,
   validateAdventure,
@@ -29,6 +33,41 @@ describe("scene ambience", () => {
     expect(guessAmbience("Rain lashes the roof.")).toBe("rain");
     expect(guessAmbience("You sit by the campfire.")).toBe("campfire");
     expect(guessAmbience("A clerk hands you a letter.")).toBe("none");
+  });
+
+  it("hears the sea, the swamp, a temple and indoors", () => {
+    expect(guessAmbience("Waves break against the ship.")).toBe("sea");
+    expect(guessAmbience("Frogs croak across the marsh.")).toBe("swamp");
+    expect(guessAmbience("Candles burn on the temple altar.")).toBe("temple");
+    expect(guessAmbience("A desk fills the small office.")).toBe("interior");
+    // Walls and doors say indoors only when nothing else says where.
+    expect(guessAmbience("A door stands open.")).toBe("interior");
+    expect(guessAmbience("The cave walls drip.")).toBe("cave");
+  });
+
+  it("carries the place into scenes that name none, but not into a quiet one", () => {
+    const goto = (scene: string) => ({ effects: [{ kind: "goto", scene }] });
+    const adventure = {
+      scenes: [
+        { id: "a", text: "A dark cave.", choices: [goto("b"), goto("q")] },
+        { id: "b", text: "She speaks.", choices: [goto("c")] },
+        { id: "c", text: "He answers.", choices: [] },
+        { id: "q", text: "Hush.", ambience: "none" as const, choices: [] },
+        { id: "z", text: "Nobody leads here.", choices: [] },
+      ],
+    };
+    const place = placeAmbience(adventure);
+    expect([...place]).toEqual([
+      ["a", "cave"],
+      ["b", "cave"],
+      ["c", "cave"],
+      ["q", "none"],
+      ["z", "none"],
+    ]);
+    expect(sceneAmbience(undefined, "She speaks.", place.get("b"))).toBe(
+      "cave",
+    );
+    expect(sceneAmbience("none", "She speaks.", "cave")).toBe("none");
   });
 
   it("lets the weather win a tie with the place", () => {
