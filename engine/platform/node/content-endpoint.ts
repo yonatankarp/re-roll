@@ -1,3 +1,4 @@
+import { own } from "../../kernel/own.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { parseContentPath } from "../browser/content-path.ts";
@@ -87,7 +88,10 @@ export function contentEndpoint(repoRoot: string) {
         if (contents === null) send(response, 404, text, "Not found");
         else send(response, 200, text, contents);
       } else if (url.pathname === "/image") {
-        const type = IMAGE_TYPES[rest.split(".").pop()?.toLowerCase() ?? ""];
+        const type = own(
+          IMAGE_TYPES,
+          rest.split(".").pop()?.toLowerCase() ?? "",
+        );
         const contents = type ? await storage?.readBytes(rest) : null;
         if (!type || !contents) send(response, 404, text, "Not found");
         // Redraws rebuild the page, and a picture shouldn't flicker each time.
@@ -110,8 +114,12 @@ export function contentEndpoint(repoRoot: string) {
       } else {
         send(response, 404, text, "Not found");
       }
-    } catch {
-      // Covers symlinks that leave the folder. The reason stays out of the response.
+    } catch (error) {
+      // Covers symlinks that leave the folder. The reason stays out of the response, but not out of the dev server's log.
+      console.warn(
+        `Content request for ${url.pathname} ${folder}/${rest} refused:`,
+        error,
+      );
       send(response, 403, text, "Refused");
     }
   };

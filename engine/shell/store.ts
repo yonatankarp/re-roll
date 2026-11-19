@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { StoreIndex, StorePackage } from "./store-index.ts";
 import { PlayerError } from "./player-error.ts";
+import { own } from "../kernel/own.ts";
 
 // The Store's own logic, apart from the screen and the downloads: which repos the player added, what
 // came from where, what a package needs first, and whether a download is the file the index promised.
@@ -69,7 +70,7 @@ export function packageStatus(
   state: StoreState,
   present: ReadonlySet<string>,
 ): PackageStatus {
-  const record = state.installed[pkg.id];
+  const record = own(state.installed, pkg.id);
   if (record?.repo === repo)
     return record.sha256 === pkg.sha256 ? "installed" : "update";
   return pkg.plugins.length > 0 &&

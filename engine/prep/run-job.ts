@@ -1,5 +1,39 @@
-import { REVIEW_SYSTEM, type RunnableJob } from "./jobs.ts";
+import type { z } from "zod";
 import type { ModelClient } from "./model.ts";
+
+// One piece of writing asked of the model, as the book importer's drafts are.
+export interface JobReview {
+  readonly name: string;
+  readonly system?: string;
+  readonly applies?: (answer: unknown) => boolean;
+  readonly prompt: (answer: string) => string;
+  readonly schema: Readonly<Record<string, unknown>>;
+  readonly ifUnreadable: "pass" | "reject";
+  // Returns a problem, null for a pass, or undefined when the review can't be read.
+  readonly judge: (
+    review: unknown,
+    answer: unknown,
+  ) => string | null | undefined;
+}
+
+export interface RunnableJob {
+  readonly id: string;
+  readonly kind: string;
+  readonly system: string;
+  readonly prompt: string;
+  readonly schema: Readonly<Record<string, unknown>>;
+  readonly validate: (value: unknown) => z.ZodSafeParseResult<unknown>;
+  readonly spoilerTerms: readonly string[];
+  readonly reviews: readonly JobReview[];
+  readonly fallback: unknown;
+  readonly maxTokens: number;
+}
+
+export const REVIEW_SYSTEM = [
+  "You are a strict but fair editor checking text prepared for a tabletop adventure.",
+  "Most text you check is fine.",
+  "Return only JSON that matches the requested format.",
+].join(" ");
 
 export const MAX_ATTEMPTS = 3;
 
@@ -61,7 +95,7 @@ function findProblems(
   return { problems: [], output: parsed.data };
 }
 
-// Model failures fall back to base text, but a failed connection throws, so prep can stop and report it.
+// Model failures fall back to base text, but a failed connection throws, so the caller can stop and report it.
 export async function runJob(
   job: RunnableJob,
   client: ModelClient,
