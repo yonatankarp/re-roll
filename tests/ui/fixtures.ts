@@ -12,7 +12,6 @@ const WATCH_CSP = `document.addEventListener("securitypolicyviolation", (event) 
 // Every test plays under the desktop app's CSP and fails on a violation, a console error or an
 // uncaught error. `problems` is the list, for a test that checks the watch itself.
 export const test = base.extend<{ problems: string[] }>({
-  // eslint-disable-next-line no-empty-pattern -- Playwright reads the fixtures a fixture asks for from this pattern
   problems: async ({}, use) => {
     await use([]);
   },
