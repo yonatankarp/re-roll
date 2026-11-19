@@ -1,0 +1,142 @@
+- id: srd52:monster/apparatus-of-the-crab
+  name: Apparatus of the Crab
+  # The SRD makes it a Large object; a crewed machine plays as a Construct, as animated objects are.
+  size: large
+  creatureType: construct
+  ac: 20
+  hp: 200
+  speed: 30
+  speeds:
+    walk: 30
+    swim: 30
+  abilities:
+    str: 10
+    dex: 10
+    con: 10
+    int: 10
+    wis: 10
+    cha: 10
+  proficiency: 0
+  initiative: 0
+  passives:
+    - kind: modifier
+      modifier:
+        kind: immunity
+        damage: poison
+    - kind: modifier
+      modifier:
+        kind: immunity
+        damage: psychic
+  multiattack: 2
+  actions:
+    - name: Claw
+      activation:
+        cost:
+          - action
+        targeting:
+          creatures: 1
+          range: 5
+          side: enemy
+        resolution:
+          kind: attack
+          attack:
+            type: weapon
+            flatBonus: 8
+          damage:
+            - amount:
+                dice: 2d6
+              type: bludgeoning
+- id: srd52:monster/giant-fly
+  name: Giant Fly
+  size: large
+  creatureType: beast
+  ac: 11
+  hp: 19
+  speed: 30
+  speeds:
+    walk: 30
+    fly: 60
+  abilities:
+    str: 14
+    dex: 13
+    con: 13
+    int: 2
+    wis: 10
+    cha: 3
+  proficiency: 2
+  saves: []
+  initiative: 1
+  multiattack: 1
+  actions: []
+  text: |-
+    Large Beast, Unaligned
+    AC 11 Initiative +1 (11)
+    HP 19 (3d10 + 3)
+    Speed 30 ft., Fly 60 ft.
+    Senses Darkvision 60 ft.; Passive Perception 10
+    Languages None
+    CR 0 (XP 0; PB +2)
+- id: srd52:monster/avatar-of-death
+  name: Avatar of Death
+  size: medium
+  creatureType: undead
+  ac: 20
+  hp: 50
+  speed: 60
+  speeds:
+    walk: 60
+    fly: 60
+  abilities:
+    str: 16
+    dex: 16
+    con: 16
+    int: 16
+    wis: 16
+    cha: 16
+  proficiency: 3
+  saves: []
+  initiative: 3
+  multiattack: 2
+  passives:
+    - kind: modifier
+      modifier:
+        kind: immunity
+        damage: necrotic
+    - kind: modifier
+      modifier:
+        kind: immunity
+        damage: poison
+    - kind: conditionImmunity
+      condition: charmed
+    - kind: conditionImmunity
+      condition: frightened
+    - kind: conditionImmunity
+      condition: paralyzed
+    - kind: conditionImmunity
+      condition: petrified
+    - kind: conditionImmunity
+      condition: poisoned
+  actions:
+    - name: Reaping Scythe
+      activation:
+        cost:
+          - action
+        targeting:
+          creatures: 1
+          range: 5
+          side: enemy
+        resolution:
+          kind: attack
+          attack:
+            type: weapon
+            flatBonus: 30
+          damage:
+            - amount:
+                dice: 1d8
+                bonus:
+                  base: 3
+              type: slashing
+            - amount:
+                dice: 1d8
+              type: necrotic
+  text: The Avatar of Death the Skull card of a Deck of Many Things summons.
