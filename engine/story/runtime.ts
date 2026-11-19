@@ -425,7 +425,15 @@ function runApplyEffects(
       );
       if (!encounter) throw new Error(`Unknown encounter ${effect.encounter}`);
       const outcomes = own(run.adventure.encounterOutcomes, encounter.id);
-      const canFlee = fleeEffects(run, state, encounter.id) !== undefined;
+      const { scene } = state.story;
+      // The default retreat only when the scene still offers a choice: one whose every choice
+      // the fight's own choice has closed (a "tried it" flag) would leave the party at a dead end.
+      const canFlee =
+        outcomes?.onFlee !== undefined ||
+        (scene !== null &&
+          findScene(run, scene).choices.some((choice) =>
+            evaluateCondition(choice.when, run, state),
+          ));
       const result = run.system.startEncounter(encounter, context, {
         canFlee,
         ...(canFlee && outcomes?.onFlee === undefined
@@ -503,20 +511,6 @@ function runApplyEffects(
   }
 }
 
-// Where fleeing leads: the encounter's own onFlee, else back into the scene the fight began in, with the
-// story as it stood before the choice. An earlier scene could lead on along paths that assume a win.
-function fleeEffects(
-  run: RunContext,
-  state: GameState,
-  encounter: string,
-): readonly StoryEffect[] | undefined {
-  const { scene } = state.story;
-  return (
-    own(run.adventure.encounterOutcomes, encounter)?.onFlee ??
-    (scene === null ? undefined : [{ kind: "goto", scene }])
-  );
-}
-
 // What the choice planned next assumes a win, so only a win carries on with it,
 // merged so that the outcome's goto replaces the choice's own.
 function runAfterEncounter(
@@ -530,7 +524,16 @@ function runAfterEncounter(
       return { frames: [effectsFrame(outcomes?.onDefeat ?? [])] };
     case "flee":
       return {
-        frames: [effectsFrame(fleeEffects(run, state, encounter) ?? [])],
+        // Without onFlee, back into the scene the fight began in. An earlier scene could lead on
+        // along paths that assume a win.
+        frames: [
+          effectsFrame(
+            outcomes?.onFlee ??
+              (state.story.scene === null
+                ? []
+                : [{ kind: "goto", scene: state.story.scene }]),
+          ),
+        ],
       };
     default:
       return {

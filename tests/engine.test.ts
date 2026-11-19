@@ -1185,6 +1185,28 @@ describe("encounter outcomes", () => {
     // No replaysExactly: this system flees every fight, so a bot walks back and forth forever.
   });
 
+  it("offers no default retreat into a scene whose choices the fight's own choice closed", async () => {
+    const seen: EncounterOptions[] = [];
+    const scenes = `
+- id: start
+  text: Start.
+  choices:
+    - label: Fight
+      when: { kind: flag, flag: tried, is: false }
+      effects:
+        - { kind: setFlag, flag: tried }
+        - { kind: startEncounter, encounter: fight }
+        - { kind: goto, scene: safe }
+- { id: safe, text: Safe. }
+`;
+    const { run } = await loadInline(
+      { "encounters.yaml": "- { id: fight }\n", "scenes.yaml": scenes },
+      fightsEndWith(null, seen),
+    );
+    choose(run, startRun(run, "s"), "0");
+    expect(seen).toEqual([{ canFlee: false, defeatContinues: false }]);
+  });
+
   it("clears an old outcome when a later fight is won", async () => {
     const { run } = await loadInline(
       {

@@ -94,8 +94,13 @@ export function setTip(token: Token): void {
   );
 }
 
+// Two letters tell the conditions apart: P alone could be poisoned, prone, paralyzed or petrified.
+const BADGE_LETTERS: ReadonlyMap<string, string> = new Map([
+  ["invisible", "Iv"],
+]);
+
 // One badge per condition, drawn as inline SVG with presentation attributes, since Tauri's CSP blocks
-// inline styles; its name stays in the tooltip, and in the badge's own label and title.
+// inline styles. The token's tooltip names them, and each badge carries its name as its label.
 export function setBadges(token: Token, conditions: readonly string[]): void {
   const SVG = "http://www.w3.org/2000/svg";
   token.badges.replaceChildren(
@@ -122,12 +127,12 @@ export function setBadges(token: Token, conditions: readonly string[]): void {
         x: "8",
         y: "11.5",
         "text-anchor": "middle",
-        "font-size": "10",
+        "font-size": "8",
         "font-weight": "bold",
         fill: "#ece3cf",
       }))
         letter.setAttribute(name, value);
-      letter.textContent = label.charAt(0);
+      letter.textContent = BADGE_LETTERS.get(condition) ?? label.slice(0, 2);
       badge.append(title, circle, letter);
       return badge;
     }),
