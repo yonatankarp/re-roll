@@ -68,15 +68,20 @@ export const CompanionProfileSchema = z.strictObject({
   id: z.string().min(1),
   name: z.string().min(1),
   pronouns: z.string().min(1),
-  personality: z.string().min(1),
-  goal: z.string().min(1),
-  secret: z.string().min(1),
-  loyalty: z.number().int(),
+  // Only in saves from before #220, which wrote these for a session-prep feature that was never played.
+  personality: z.string().min(1).optional(),
+  goal: z.string().min(1).optional(),
+  secret: z.string().min(1).optional(),
+  loyalty: z.number().int().optional(),
 });
 export type CompanionProfile = Readonly<z.infer<typeof CompanionProfileSchema>>;
 
 export const GameStateSchema = z.strictObject({
-  rng: z.strictObject({ world: RngStateSchema, play: RngStateSchema }),
+  // world is where the start's draws ended, only in saves from before #220, since nothing draws from it after.
+  rng: z.strictObject({
+    world: RngStateSchema.optional(),
+    play: RngStateSchema,
+  }),
   partyIds: z.array(z.string()),
   companions: z.record(z.string(), CompanionProfileSchema),
   stack: z.array(FrameSchema),

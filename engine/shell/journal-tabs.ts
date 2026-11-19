@@ -146,7 +146,7 @@ export function rollsWhy(): {
   why.hidden = true;
   why
     .querySelector("summary")
-    ?.setAttribute("aria-label", "The rolls behind the latest result");
+    ?.setAttribute("aria-label", "Why? The rolls behind the latest result"); // its word first, for voice control
   return {
     node: why,
     update: (view) => {

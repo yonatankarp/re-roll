@@ -1,7 +1,9 @@
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import {
+  BATCH_BYTES,
   type InstallPlan,
+  batches,
   describePlan,
   installPlan,
   planInstall,
@@ -252,5 +254,21 @@ describe("installPlan", () => {
       ["content_install_commit", art],
       ["content_install_commit", glossary],
     ]);
+  });
+});
+
+describe("batches", () => {
+  it("unpacks many files a pass, but never more than a batch's bytes beside one large file", () => {
+    const sizes = new Map([
+      ["a", 10],
+      ["b", BATCH_BYTES - 10],
+      ["c", 1],
+      ["huge", BATCH_BYTES * 2],
+      ["d", 1],
+    ]);
+    expect(
+      batches([...sizes.keys()], sizes).map((group) => [...group]),
+    ).toEqual([["a", "b"], ["c"], ["huge"], ["d"]]);
+    expect(batches([], sizes)).toEqual([]);
   });
 });
