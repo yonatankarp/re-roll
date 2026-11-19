@@ -1362,8 +1362,8 @@ describe("weapon proficiency limited by property", () => {
     );
     expect(gear).toEqual(
       expect.arrayContaining([
-        "srd52:item/shortsword",
-        "srd52:item/leather-armor",
+        "srd52:item/rapier",
+        "srd52:item/studded-leather-armor",
       ]),
     );
     expect(gear).not.toContain("srd52:item/longsword");

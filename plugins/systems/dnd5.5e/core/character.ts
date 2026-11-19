@@ -1531,13 +1531,21 @@ function averageDamage(weapon: Weapon): number {
   return (Number(count) * (Number(sides) + 1)) / 2;
 }
 
-// shortcut: everyone starts with the best gear they can use. The class and background tables, and money, aren't modeled.
+// Chain Mail's price, the dearest item in any SRD class's starting equipment.
+const STARTING_ITEM_MAX_CP = 7500;
+
+// shortcut: everyone starts with the best gear they can use and afford. The class and background tables, and money,
+// aren't modeled.
 export function startingGear(
   classDef: ClassDef,
   abilities: AbilityScores,
   access: ContentAccess,
 ): readonly string[] {
-  const items: readonly Item[] = namedContent(access, "item", ItemSchema);
+  const items: readonly Item[] = namedContent(
+    access,
+    "item",
+    ItemSchema,
+  ).filter((item) => (item.costCp ?? 0) <= STARTING_ITEM_MAX_CP);
   const dex = abilityModifier(abilities.dex);
   const str = abilityModifier(abilities.str);
   const best = <T>(list: readonly T[], score: (item: T) => number) =>

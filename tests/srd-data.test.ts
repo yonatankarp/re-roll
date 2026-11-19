@@ -329,15 +329,20 @@ describe("the pregens", () => {
   }
 
   it.each(["fighter", "rogue", "cleric", "wizard"])(
-    "the %s is the character creation makes of the same picks, gear included",
+    "the %s is the character creation makes of the same picks",
     (slug) => {
       const { pregen, made, left } = handBuilt(slug);
       expect(left).toEqual([]); // creation asked for every pick the pregen states
+      // Its gear is its own: creation's starting gear is a shortcut that takes the best of the SRD's equipment.
       expect(made).toMatchObject({
         build: pregen.build,
-        inventory: pregen.equipment,
         hp: deriveStats(pregenActor(slug), run).maxHp,
       });
+      for (const id of pregen.equipment) {
+        expect(lookup(run, ItemSchema, id).costCp ?? 0).toBeLessThanOrEqual(
+          7500,
+        );
+      }
     },
   );
 

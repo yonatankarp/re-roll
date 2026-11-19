@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import type { GameEvent } from "../engine/kernel/events.ts";
@@ -32,11 +32,14 @@ function manifest(
 }
 
 const srdEntry = (folder: string, id: string): Record<string, unknown> => {
-  const path = `plugins/rules/srd52/${folder}/core.yaml`;
-  const entries = parse(readFileSync(path, "utf8")) as Record<
-    string,
-    unknown
-  >[];
+  const path = `plugins/rules/srd52/${folder}`;
+  const entries = readdirSync(path).flatMap(
+    (file) =>
+      parse(readFileSync(`${path}/${file}`, "utf8")) as Record<
+        string,
+        unknown
+      >[],
+  );
   const found = entries.find((entry) => entry.id === id);
   if (!found) throw new Error(`${id} isn't in ${path}`);
   return found;

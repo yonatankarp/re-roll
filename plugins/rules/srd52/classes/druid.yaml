@@ -17,7 +17,7 @@
     cantrips: levelUp
     spells: prepare
   tools:
-    - phb:item/herbalism-kit
+    - srd52:item/herbalism-kit
   levels:
     - level: 1
       grants:

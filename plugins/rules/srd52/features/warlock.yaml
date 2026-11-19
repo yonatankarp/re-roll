@@ -722,42 +722,37 @@
       name: Imp
       passives:
         - kind: familiarForm
-          form: phb:monster/imp
+          form: srd52:monster/imp
     - id: pseudodragon
       name: Pseudodragon
       passives:
         - kind: familiarForm
-          form: phb:monster/pseudodragon
+          form: srd52:monster/pseudodragon
     - id: quasit
       name: Quasit
       passives:
         - kind: familiarForm
-          form: phb:monster/quasit
+          form: srd52:monster/quasit
     - id: skeleton
       name: Skeleton
       passives:
         - kind: familiarForm
           form: srd52:monster/skeleton
-    - id: slaad-tadpole
-      name: Slaad Tadpole
-      passives:
-        - kind: familiarForm
-          form: phb:monster/slaad-tadpole
     - id: sphinx-of-wonder
       name: Sphinx Of Wonder
       passives:
         - kind: familiarForm
-          form: phb:monster/sphinx-of-wonder
+          form: srd52:monster/sphinx-of-wonder
     - id: sprite
       name: Sprite
       passives:
         - kind: familiarForm
-          form: phb:monster/sprite
+          form: srd52:monster/sprite
     - id: venomous-snake
       name: Venomous Snake
       passives:
         - kind: familiarForm
-          form: phb:monster/venomous-snake
+          form: srd52:monster/venomous-snake
     - id: owl
       name: Owl
       passives:
@@ -767,52 +762,47 @@
       name: Bat
       passives:
         - kind: familiarForm
-          form: phb:monster/bat
+          form: srd52:monster/bat
     - id: cat
       name: Cat
       passives:
         - kind: familiarForm
-          form: phb:monster/cat
+          form: srd52:monster/cat
     - id: frog
       name: Frog
       passives:
         - kind: familiarForm
-          form: phb:monster/frog
+          form: srd52:monster/frog
     - id: hawk
       name: Hawk
       passives:
         - kind: familiarForm
-          form: phb:monster/hawk
+          form: srd52:monster/hawk
     - id: lizard
       name: Lizard
       passives:
         - kind: familiarForm
-          form: phb:monster/lizard
-    - id: octopus
-      name: Octopus
-      passives:
-        - kind: familiarForm
-          form: phb:monster/octopus
+          form: srd52:monster/lizard
     - id: rat
       name: Rat
       passives:
         - kind: familiarForm
-          form: phb:monster/rat
+          form: srd52:monster/rat
     - id: raven
       name: Raven
       passives:
         - kind: familiarForm
-          form: phb:monster/raven
+          form: srd52:monster/raven
     - id: spider
       name: Spider
       passives:
         - kind: familiarForm
-          form: phb:monster/spider
+          form: srd52:monster/spider
     - id: weasel
       name: Weasel
       passives:
         - kind: familiarForm
-          form: phb:monster/weasel
+          form: srd52:monster/weasel
   familiar:
     attacks: true
   passives:

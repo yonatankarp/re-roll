@@ -1,0 +1,1554 @@
+- id: srd52:item/acid
+  name: Acid
+  type: gear
+  category: adventuring
+  costCp: 2500
+  activation:
+    cost:
+      - action
+    targeting:
+      creatures: 1
+      range: 20
+      side: enemy
+    resolution:
+      kind: save
+      ability: dex
+      dc:
+        base: 8
+        add:
+          - kind: abilityMod
+            ability: dex
+          - kind: proficiency
+      damage:
+        - amount:
+            dice: 2d6
+          type: acid
+      onFail: []
+      onSuccess: []
+  text: When you take the Attack action, you can replace one of your attacks with throwing a vial of Acid. Target one creature or object you can see within 20 feet of yourself. The target must succeed on a Dexterity saving throw (DC 8 plus your Dexterity modifier and Proficiency Bonus) or take 2d6 Acid damage.
+- id: srd52:item/airship
+  name: Airship
+  type: gear
+  category: vehicle
+  costCp: 4000000
+- id: srd52:item/alchemist-s-fire
+  name: Alchemist’s Fire
+  type: gear
+  category: adventuring
+  costCp: 5000
+  activation:
+    cost:
+      - action
+    targeting:
+      creatures: 1
+      range: 20
+      side: enemy
+    resolution:
+      kind: save
+      ability: dex
+      dc:
+        base: 8
+        add:
+          - kind: abilityMod
+            ability: dex
+          - kind: proficiency
+      damage:
+        - amount:
+            dice: 1d4
+          type: fire
+      onFail:
+        - kind: modifier
+          duration:
+            minutes: 1
+          modifier:
+            kind: lingeringDamage
+            when: turnStart
+            damage:
+              - amount:
+                  dice: 1d4
+                type: fire
+      onSuccess: []
+  text: When you take the Attack action, you can replace one of your attacks with throwing a flask of Alchemist’s Fire. Target one creature or object you can see within 20 feet of yourself. The target must succeed on a Dexterity saving throw (DC 8 plus your Dexterity modifier and Proficiency Bonus) or take 1d4 Fire damage and start burning (see “Rules Glossary”).
+- id: srd52:item/alchemist-s-supplies
+  name: Alchemist’s Supplies
+  type: tool
+  ability: int
+  costCp: 5000
+  artisan: true
+  text: "Ability: Intelligence Weight: 8 lb. Utilize: Identify a substance (DC 15), or start a fire (DC 15) Craft: Acid, Alchemist’s Fire, Component Pouch, Oil, Paper, Perfume"
+- id: srd52:item/ammunition
+  name: Ammunition
+  type: gear
+  category: adventuring
+  text: Flail
+- id: srd52:item/amulet
+  name: Amulet (worn or held)
+  type: gear
+  category: focus
+  costCp: 500
+  weightLb: 1
+- id: srd52:item/antitoxin
+  name: Antitoxin
+  type: gear
+  category: adventuring
+  costCp: 5000
+  weightLb: 2
+  text: As a Bonus Action, you can drink a vial of Antitoxin to gain Advantage on saving throws to avoid or end the Poisoned condition for 1 hour.
+- id: srd52:item/arcane-focus
+  name: Arcane Focus
+  type: gear
+  category: adventuring
+  costCp: 500
+  weightLb: 2
+  text: An Arcane Focus takes one of the forms in the Arcane Focuses table and is bejeweled or carved to channel arcane magic. A Sorcerer, Warlock, or Wizard can use such an item as a Spellcasting Focus.
+- id: srd52:item/arrows
+  name: Arrows
+  type: gear
+  category: ammunition
+  costCp: 100
+  weightLb: 1
+- id: srd52:item/backpack
+  name: Backpack
+  type: gear
+  category: adventuring
+  costCp: 200
+  weightLb: 5
+  text: A Backpack holds up to 30 pounds within 1 cubic foot. It can also serve as a saddlebag.
+- id: srd52:item/ball-bearings
+  name: Ball Bearings
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 2
+  text: As a Utilize action, you can spill Ball Bearings from their pouch. They spread to cover a level, 10-footsquare area within 10 feet of yourself. A creature that enters this area for the first time on a turn must succeed on a DC 10 Dexterity saving throw or have the Prone condition. It takes 10 minutes to recover the Ball Bearings.
+- id: srd52:item/barrel
+  name: Barrel
+  type: gear
+  category: adventuring
+  costCp: 200
+  weightLb: 70
+  text: A Barrel holds up to 40 gallons of liquid or up to 4 cubic feet of dry goods.
+- id: srd52:item/basket
+  name: Basket
+  type: gear
+  category: adventuring
+  costCp: 40
+  weightLb: 2
+  text: A Basket holds up to 40 pounds within 2 cubic feet.
+- id: srd52:item/battleaxe
+  name: Battleaxe
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d8
+    type: slashing
+  properties:
+    - versatile
+  mastery: topple
+  costCp: 1000
+  weightLb: 4
+- id: srd52:item/bedroll
+  name: Bedroll
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 7
+  text: A Bedroll sleeps one Small or Medium creature. While in a Bedroll, you automatically succeed on saving throws against extreme cold (see “Gameplay Toolbox”).
+- id: srd52:item/bell
+  name: Bell
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 3
+  text: When rung as a Utilize action, a Bell produces a sound that can be heard up to 60 feet away.
+- id: srd52:item/blanket
+  name: Blanket
+  type: gear
+  category: adventuring
+  costCp: 50
+  weightLb: 3
+  text: While wrapped in a blanket, you have Advantage on saving throws against extreme cold (see “Gameplay Toolbox”).
+- id: srd52:item/block-and-tackle
+  name: Block and Tackle
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 5
+  text: A Block and Tackle allows you to hoist up to four times the weight you can normally lift.
+- id: srd52:item/blowgun
+  name: Blowgun
+  type: weapon
+  category: martial
+  damage:
+    flat: 1
+    type: piercing
+  properties:
+    - ammunition
+    - loading
+  mastery: vex
+  costCp: 1000
+  weightLb: 1
+  range:
+    normal: 25
+    long: 100
+- id: srd52:item/bolts
+  name: Bolts
+  type: gear
+  category: ammunition
+  costCp: 100
+- id: srd52:item/book
+  name: Book
+  type: gear
+  category: adventuring
+  costCp: 2500
+  weightLb: 5
+  text: A Book contains fiction or nonfiction. If you consult an accurate nonfiction Book about its topic, you gain a +5 bonus to Intelligence (Arcana, History, Nature, or Religion) checks you make about that topic.
+- id: srd52:item/bottle-glass
+  name: Bottle, Glass
+  type: gear
+  category: adventuring
+  costCp: 200
+  weightLb: 2
+  text: A Glass Bottle holds up to 11/2 pints.
+- id: srd52:item/breastplate
+  name: Breastplate
+  type: armor
+  armorType: medium
+  base: 14
+  addDex: true
+  maxDex: 2
+  costCp: 40000
+  weightLb: 20
+- id: srd52:item/brewer-s-supplies
+  name: Brewer’s Supplies
+  type: tool
+  ability: int
+  costCp: 2000
+  artisan: true
+  text: "Ability: Intelligence Weight: 9 lb. Utilize: Detect poisoned drink (DC 15), or identify alcohol (DC 10) Craft: Antitoxin"
+- id: srd52:item/bucket
+  name: Bucket
+  type: gear
+  category: adventuring
+  costCp: 5
+  weightLb: 2
+  text: A Bucket holds up to half a cubic foot of contents.
+- id: srd52:item/bullets-firearm
+  name: Bullets, Firearm
+  type: gear
+  category: ammunition
+  costCp: 300
+  weightLb: 2
+- id: srd52:item/bullets-sling
+  name: Bullets, Sling
+  type: gear
+  category: ammunition
+  costCp: 4
+- id: srd52:item/burglar-s-pack
+  name: Burglar’s Pack
+  type: gear
+  category: pack
+  costCp: 1600
+  weightLb: 42
+  text: "A Burglar’s Pack contains the following items: Backpack, Ball Bearings, Bell, 10 Candles, Crowbar, Hooded Lantern, 7 flasks of Oil, 5 days of Rations, Rope, Tinderbox, and Waterskin."
+- id: srd52:item/calligrapher-s-supplies
+  name: Calligrapher’s Supplies
+  type: tool
+  ability: dex
+  costCp: 1000
+  artisan: true
+  text: "Ability: Dexterity Weight: 5 lb. Utilize: Write text with impressive flourishes that guard against forgery (DC 15) Craft: Ink, Spell Scroll"
+- id: srd52:item/caltrops
+  name: Caltrops
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 2
+  text: As a Utilize action, you can spread Caltrops from their bag to cover a 5-foot-square area within 5 feet of yourself. A creature that enters this area for the first time on a turn must succeed on a DC 15 Dexterity saving throw or take 1 Piercing damage and have its Speed reduced to 0 until the start of its next turn. It takes 10 minutes to recover the Caltrops.
+- id: srd52:item/camel
+  name: Camel
+  type: gear
+  category: mount
+  costCp: 5000
+  weightLb: 450
+- id: srd52:item/candle
+  name: Candle
+  type: gear
+  category: adventuring
+  costCp: 1
+  weightLb: 0.5
+  text: For 1 hour, a lit Candle sheds Bright Light in a 5-foot radius and Dim Light for an additional 5 feet.
+- id: srd52:item/carpenter-s-tools
+  name: Carpenter’s Tools
+  type: tool
+  ability: str
+  costCp: 800
+  artisan: true
+  text: "Ability: Strength Weight: 6 lb. Utilize: Seal or pry open a door or container (DC 20) Craft: Club, Greatclub, Quarterstaff, Barrel, Chest, Ladder, Pole, Portable Ram, Torch"
+- id: srd52:item/carriage
+  name: Carriage
+  type: gear
+  category: tack
+  costCp: 10000
+  weightLb: 600
+- id: srd52:item/cart
+  name: Cart
+  type: gear
+  category: tack
+  costCp: 1500
+  weightLb: 200
+- id: srd52:item/cartographer-s-tools
+  name: Cartographer’s Tools
+  type: tool
+  ability: wis
+  costCp: 1500
+  artisan: true
+  text: "Ability: Wisdom Weight: 6 lb. Utilize: Draft a map of a small area (DC 15) Craft: Map"
+- id: srd52:item/case-crossbow-bolt
+  name: Case, Crossbow Bolt
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 1
+  text: A Crossbow Bolt Case holds up to 20 Bolts.
+- id: srd52:item/case-map-or-scroll
+  name: Case, Map or Scroll
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 1
+  text: A Map or Scroll Case holds up to 10 sheets of paper or 5 sheets of parchment.
+- id: srd52:item/chain-shirt
+  name: Chain Shirt
+  type: armor
+  armorType: medium
+  base: 13
+  addDex: true
+  maxDex: 2
+  costCp: 5000
+  weightLb: 20
+- id: srd52:item/chain
+  name: Chain
+  type: gear
+  category: adventuring
+  costCp: 500
+  weightLb: 10
+  text: As a Utilize action, you can wrap a Chain around an unwilling creature within 5 feet of yourself that has the Grappled, Incapacitated, or Restrained condition if you succeed on a DC 13 Strength (Athletics) check. If the creature’s legs are bound, the creature has the Restrained condition until it escapes. Escaping the Chain requires the creature to make a successful DC 18 Dexterity (Acrobatics) check as an action. Bursting the Chain requires a successful DC 20 Strength (Athletics) check as an action.
+- id: srd52:item/chariot
+  name: Chariot
+  type: gear
+  category: tack
+  costCp: 25000
+  weightLb: 100
+- id: srd52:item/chest
+  name: Chest
+  type: gear
+  category: adventuring
+  costCp: 500
+  weightLb: 25
+  text: A Chest holds up to 12 cubic feet of contents.
+- id: srd52:item/climber-s-kit
+  name: Climber’s Kit
+  type: gear
+  category: adventuring
+  costCp: 2500
+  weightLb: 12
+  text: A Climber’s Kit includes boot tips, gloves, pitons, and a harness. As a Utilize action, you can use the Climber’s Kit to anchor yourself; when you do, you can’t fall more than 25 feet from the anchor point, and you can’t move more than 25 feet from there without undoing the anchor as a Bonus Action.
+- id: srd52:item/clothes-fine
+  name: Clothes, Fine
+  type: gear
+  category: adventuring
+  costCp: 1500
+  weightLb: 6
+  text: Fine Clothes are made of expensive fabrics and adorned with expertly crafted details. Some events and locations admit only people wearing these clothes.
+- id: srd52:item/clothes-traveler-s
+  name: Clothes, Traveler’s
+  type: gear
+  category: adventuring
+  costCp: 200
+  weightLb: 4
+  text: Traveler’s Clothes are resilient garments designed for travel in various environments.
+- id: srd52:item/club
+  name: Club
+  type: weapon
+  category: simple
+  damage:
+    dice: 1d4
+    type: bludgeoning
+  properties:
+    - light
+  mastery: slow
+  costCp: 10
+  weightLb: 2
+- id: srd52:item/cobbler-s-tools
+  name: Cobbler’s Tools
+  type: tool
+  ability: dex
+  costCp: 500
+  artisan: true
+  text: "Ability: Dexterity Weight: 5 lb. Utilize: Modify footwear to give Advantage on the wearer’s next Dexterity (Acrobatics) check (DC 10) Craft: Climber’s Kit"
+- id: srd52:item/component-pouch
+  name: Component Pouch
+  type: gear
+  category: adventuring
+  costCp: 2500
+  weightLb: 2
+  text: A Component Pouch is watertight and filled with compartments that hold all the free Material components of your spells.
+- id: srd52:item/cook-s-utensils
+  name: Cook’s Utensils
+  type: tool
+  ability: wis
+  costCp: 100
+  artisan: true
+  text: "Ability: Wisdom Weight: 8 lb. Utilize: Improve food’s flavor (DC 10), or detect spoiled or poisoned food (DC 15) Craft: Rations"
+- id: srd52:item/costume
+  name: Costume
+  type: gear
+  category: adventuring
+  costCp: 500
+  weightLb: 4
+  text: While wearing a Costume, you have Advantage on any ability check you make to impersonate the person or type of person it represents.
+- id: srd52:item/crowbar
+  name: Crowbar
+  type: gear
+  category: adventuring
+  costCp: 200
+  weightLb: 5
+  text: Using a Crowbar gives you Advantage on Strength checks where the Crowbar’s leverage can be applied.
+- id: srd52:item/crystal
+  name: Crystal
+  type: gear
+  category: focus
+  costCp: 1000
+  weightLb: 1
+- id: srd52:item/dart
+  name: Dart
+  type: weapon
+  category: simple
+  damage:
+    dice: 1d4
+    type: piercing
+  properties:
+    - finesse
+    - thrown
+  mastery: vex
+  range:
+    normal: 20
+    long: 60
+  costCp: 5
+  weightLb: 0.25
+- id: srd52:item/diplomat-s-pack
+  name: Diplomat’s Pack
+  type: gear
+  category: pack
+  costCp: 3900
+  weightLb: 39
+  text: "A Diplomat’s Pack contains the following items: Chest, Fine Clothes, Ink, 5 Ink Pens, Lamp, 2 Map or Scroll Cases, 4 flasks of Oil, 5 sheets of Paper, 5 sheets of Parchment, Perfume, and Tinderbox."
+- id: srd52:item/disguise-kit
+  name: Disguise Kit
+  type: tool
+  ability: cha
+  costCp: 2500
+  text: "Ability: Charisma Weight: 3 lb. Utilize: Apply makeup (DC 10) Craft: Costume"
+- id: srd52:item/druidic-focus
+  name: Druidic Focus
+  type: gear
+  category: adventuring
+  costCp: 3000
+  text: A Druidic Focus takes one of the forms in the Druidic Focuses table and is carved, tied with ribbon, or painted to channel primal magic. A Druid or Ranger can use such an object as a Spellcasting Focus.
+- id: srd52:item/dungeoneer-s-pack
+  name: Dungeoneer’s Pack
+  type: gear
+  category: pack
+  costCp: 1200
+  weightLb: 55
+  text: "A Dungeoneer’s Pack contains the following items: Backpack, Caltrops, Crowbar, 2 flasks of Oil, 10 days of Rations, Rope, Tinderbox, 10 Torches, and Waterskin."
+- id: srd52:item/elephant
+  name: Elephant
+  type: gear
+  category: mount
+  costCp: 20000
+  weightLb: 320
+- id: srd52:item/emblem
+  name: Emblem (borne on fabric or a Shield)
+  type: gear
+  category: focus
+  costCp: 500
+- id: srd52:item/entertainer-s-pack
+  name: Entertainer’s Pack
+  type: gear
+  category: pack
+  costCp: 4000
+  text: "An Entertainer’s Pack contains the following items: Backpack, Bedroll, Bell, Bullseye Lantern, 3 Costumes, Mirror, 8 flasks of Oil, 9 days of Rations, Tinderbox, and Waterskin."
+- id: srd52:item/explorer-s-pack
+  name: Explorer’s Pack
+  type: gear
+  category: pack
+  costCp: 1000
+  weightLb: 55
+  text: "An Explorer’s Pack contains the following items: Backpack, Bedroll, 2 flasks of Oil, 10 days of Rations, Rope, Tinderbox, 10 Torches, and Waterskin."
+- id: srd52:item/feed-per-day
+  name: Feed per day
+  type: gear
+  category: tack
+  costCp: 5
+  weightLb: 10
+- id: srd52:item/flail
+  name: Flail
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d8
+    type: bludgeoning
+  properties: []
+  mastery: sap
+  costCp: 1000
+  weightLb: 2
+- id: srd52:item/flask
+  name: Flask
+  type: gear
+  category: adventuring
+  costCp: 2
+  weightLb: 1
+  text: A Flask holds up to 1 pint.
+- id: srd52:item/forgery-kit
+  name: Forgery Kit
+  type: tool
+  ability: dex
+  costCp: 1500
+  text: "Ability: Dexterity Weight: 5 lb. Utilize: Mimic 10 or fewer words of someone else’s handwriting (DC 15), or duplicate a wax seal (DC 20)"
+- id: srd52:item/galley
+  name: Galley
+  type: gear
+  category: vehicle
+  costCp: 3000000
+- id: srd52:item/gaming-set
+  name: Gaming Set
+  type: tool
+  ability: wis
+  text: "Ability: Wisdom Weight: — Utilize: Discern whether someone is cheating (DC 10), or win the game (DC 20) Variants: Dice (1 SP), dragonchess (1 GP), playing cards (5 SP), three-dragon ante (1 GP)"
+- id: srd52:item/glaive
+  name: Glaive
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d10
+    type: slashing
+  properties:
+    - heavy
+    - reach
+    - twoHanded
+  mastery: graze
+  costCp: 2000
+  weightLb: 6
+- id: srd52:item/glassblower-s-tools
+  name: Glassblower’s Tools
+  type: tool
+  ability: int
+  costCp: 3000
+  artisan: true
+  text: "Ability: Intelligence Weight: 5 lb. Utilize: Discern what a glass object held in the past 24 hours (DC 15) Craft: Glass Bottle, Magnifying Glass, Spyglass, Vial"
+- id: srd52:item/grappling-hook
+  name: Grappling Hook
+  type: gear
+  category: adventuring
+  costCp: 200
+  weightLb: 4
+  text: As a Utilize action, you can throw the Grappling Hook at a railing, a ledge, or another catch within 50 feet of yourself, and the hook catches on if you succeed on a DC 13 Dexterity (Acrobatics) check. If you tied a Rope to the hook, you can then climb it.
+- id: srd52:item/greataxe
+  name: Greataxe
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d12
+    type: slashing
+  properties:
+    - heavy
+    - twoHanded
+  mastery: cleave
+  costCp: 3000
+  weightLb: 7
+- id: srd52:item/greatclub
+  name: Greatclub
+  type: weapon
+  category: simple
+  damage:
+    dice: 1d8
+    type: bludgeoning
+  properties:
+    - twoHanded
+  mastery: push
+  costCp: 20
+  weightLb: 10
+- id: srd52:item/greatsword
+  name: Greatsword
+  type: weapon
+  category: martial
+  damage:
+    dice: 2d6
+    type: slashing
+  properties:
+    - heavy
+    - twoHanded
+  mastery: graze
+  costCp: 5000
+  weightLb: 6
+- id: srd52:item/halberd
+  name: Halberd
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d10
+    type: slashing
+  properties:
+    - heavy
+    - reach
+    - twoHanded
+  mastery: cleave
+  costCp: 2000
+  weightLb: 6
+- id: srd52:item/half-plate-armor
+  name: Half Plate Armor
+  type: armor
+  armorType: medium
+  stealthDisadvantage: true
+  base: 15
+  addDex: true
+  maxDex: 2
+  costCp: 75000
+  weightLb: 40
+- id: srd52:item/hand-crossbow
+  name: Hand Crossbow
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d6
+    type: piercing
+  properties:
+    - ammunition
+    - light
+    - loading
+  mastery: vex
+  costCp: 7500
+  weightLb: 3
+  range:
+    normal: 30
+    long: 120
+- id: srd52:item/handaxe
+  name: Handaxe
+  type: weapon
+  category: simple
+  damage:
+    dice: 1d6
+    type: slashing
+  properties:
+    - light
+    - thrown
+  mastery: vex
+  range:
+    normal: 20
+    long: 60
+  costCp: 500
+  weightLb: 2
+- id: srd52:item/healer-s-kit
+  name: Healer’s Kit
+  type: gear
+  category: adventuring
+  costCp: 500
+  uses: 10
+  weightLb: 3
+  text: A Healer’s Kit has ten uses. As a Utilize action, you can expend one of its uses to stabilize an Unconscious creature that has 0 Hit Points without needing to make a Wisdom (Medicine) check.
+- id: srd52:item/heavy-crossbow
+  name: Heavy Crossbow
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d10
+    type: piercing
+  properties:
+    - ammunition
+    - heavy
+    - loading
+    - twoHanded
+  mastery: push
+  costCp: 5000
+  weightLb: 18
+  range:
+    normal: 100
+    long: 400
+- id: srd52:item/herbalism-kit
+  name: Herbalism Kit
+  type: tool
+  ability: int
+  costCp: 500
+  text: "Ability: Intelligence Weight: 3 lb. Utilize: Identify a plant (DC 10) Craft: Antitoxin, Candle, Healer’s Kit, Potion of Healing"
+- id: srd52:item/hide-armor
+  name: Hide Armor
+  type: armor
+  armorType: medium
+  base: 12
+  addDex: true
+  maxDex: 2
+  costCp: 1000
+  weightLb: 12
+- id: srd52:item/holy-symbol
+  name: Holy Symbol
+  type: gear
+  category: adventuring
+  costCp: 1
+  weightLb: 1
+  text: A Holy Symbol takes one of the forms in the Holy Symbol table and is bejeweled or painted to channel divine magic. A Cleric or Paladin can use a Holy Symbol as a Spellcasting Focus. The table indicates whether a Holy Symbol needs to be held, worn, or borne on fabric (such as a tabard or banner) or a Shield.
+- id: srd52:item/holy-water
+  name: Holy Water
+  type: gear
+  category: adventuring
+  costCp: 2500
+  activation:
+    cost:
+      - action
+    targeting:
+      creatures: 1
+      range: 20
+      side: enemy
+      creatureTypes:
+        - fiend
+        - undead
+    resolution:
+      kind: save
+      ability: dex
+      dc:
+        base: 8
+        add:
+          - kind: abilityMod
+            ability: dex
+          - kind: proficiency
+      damage:
+        - amount:
+            dice: 2d8
+          type: radiant
+      onFail: []
+      onSuccess: []
+  weightLb: 1
+  text: When you take the Attack action, you can replace one of your attacks with throwing a flask of Holy Water. Target one creature you can see within 20 feet of yourself. The target must succeed on a Dexterity saving throw (DC 8 plus your Dexterity modifier and Proficiency Bonus) or take 2d8 Radiant damage if it is a Fiend or an Undead.
+- id: srd52:item/horse-draft
+  name: Horse, Draft
+  type: gear
+  category: mount
+  costCp: 5000
+  weightLb: 540
+- id: srd52:item/horse-riding
+  name: Horse, Riding
+  type: gear
+  category: mount
+  costCp: 7500
+  weightLb: 480
+- id: srd52:item/hunting-trap
+  name: Hunting Trap
+  type: gear
+  category: adventuring
+  costCp: 500
+  weightLb: 25
+  text: As a Utilize action, you can set a Hunting Trap, which is a sawtooth steel ring that snaps shut when a creature steps on a pressure plate in the center.
+- id: srd52:item/ink-pen
+  name: Ink Pen
+  type: gear
+  category: adventuring
+  costCp: 2
+  text: Using Ink, an Ink Pen is used to write or draw.
+- id: srd52:item/ink
+  name: Ink
+  type: gear
+  category: adventuring
+  costCp: 1000
+  text: Ink comes in a 1-ounce bottle, which provides enough ink to write about 500 pages.
+- id: srd52:item/javelin
+  name: Javelin
+  type: weapon
+  category: simple
+  damage:
+    dice: 1d6
+    type: piercing
+  properties:
+    - thrown
+  mastery: slow
+  range:
+    normal: 30
+    long: 120
+  costCp: 50
+  weightLb: 2
+- id: srd52:item/jeweler-s-tools
+  name: Jeweler’s Tools
+  type: tool
+  ability: int
+  costCp: 2500
+  artisan: true
+  text: "Ability: Intelligence Weight: 2 lb. Utilize: Discern a gem’s value (DC 15) Craft: Arcane Focus, Holy Symbol"
+- id: srd52:item/jug
+  name: Jug
+  type: gear
+  category: adventuring
+  costCp: 2
+  weightLb: 4
+  text: A Jug holds up to 1 gallon.
+- id: srd52:item/keelboat
+  name: Keelboat
+  type: gear
+  category: vehicle
+  costCp: 300000
+- id: srd52:item/ladder
+  name: Ladder
+  type: gear
+  category: adventuring
+  costCp: 10
+  weightLb: 25
+  text: A Ladder is 10 feet tall. You must climb to move up or down it.
+- id: srd52:item/lamp
+  name: Lamp
+  type: gear
+  category: adventuring
+  costCp: 50
+  weightLb: 1
+  text: A Lamp burns Oil as fuel to cast Bright Light in a 15foot radius and Dim Light for an additional 30 feet.
+- id: srd52:item/lance
+  name: Lance
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d10
+    type: piercing
+  properties:
+    - heavy
+    - reach
+    - twoHanded
+  mastery: topple
+  costCp: 1000
+  weightLb: 6
+- id: srd52:item/lantern-bullseye
+  name: Lantern, Bullseye
+  type: gear
+  category: adventuring
+  costCp: 1000
+  weightLb: 2
+  text: A Bullseye Lantern burns Oil as fuel to cast Bright Light in a 60-foot Cone and Dim Light for an additional 60 feet.
+- id: srd52:item/lantern-hooded
+  name: Lantern, Hooded
+  type: gear
+  category: adventuring
+  costCp: 500
+  weightLb: 2
+  text: A Hooded Lantern burns Oil as fuel to cast Bright Light in a 30-foot radius and Dim Light for an additional 30 feet. As a Bonus Action, you can lower the hood, reducing the light to Dim Light in a 5-foot radius, or raise it again.
+- id: srd52:item/leatherworker-s-tools
+  name: Leatherworker’s Tools
+  type: tool
+  ability: dex
+  costCp: 500
+  artisan: true
+  text: "Ability: Dexterity Weight: 5 lb. Utilize: Add a design to a leather item (DC 10) Craft: Sling, Whip, Hide Armor, Leather Armor, Studded Leather Armor, Backpack, Crossbow Bolt Case, Map or Scroll Case, Parchment, Pouch, Quiver, Waterskin"
+- id: srd52:item/light-crossbow
+  name: Light Crossbow
+  type: weapon
+  category: simple
+  damage:
+    dice: 1d8
+    type: piercing
+  properties:
+    - ammunition
+    - loading
+    - twoHanded
+  mastery: slow
+  costCp: 2500
+  weightLb: 5
+  range:
+    normal: 80
+    long: 320
+- id: srd52:item/light-hammer
+  name: Light Hammer
+  type: weapon
+  category: simple
+  damage:
+    dice: 1d4
+    type: bludgeoning
+  properties:
+    - light
+    - thrown
+  mastery: nick
+  range:
+    normal: 20
+    long: 60
+  costCp: 200
+  weightLb: 2
+- id: srd52:item/lock
+  name: Lock
+  type: gear
+  category: adventuring
+  costCp: 1000
+  weightLb: 1
+  text: A Lock comes with a key. Without the key, a creature can use Thieves’ Tools to pick this Lock with a successful DC 15 Dexterity (Sleight of Hand) check.
+- id: srd52:item/longbow
+  name: Longbow
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d8
+    type: piercing
+  properties:
+    - ammunition
+    - heavy
+    - twoHanded
+  mastery: slow
+  costCp: 5000
+  weightLb: 2
+  range:
+    normal: 150
+    long: 600
+- id: srd52:item/longship
+  name: Longship
+  type: gear
+  category: vehicle
+  costCp: 1000000
+- id: srd52:item/magnifying-glass
+  name: Magnifying Glass
+  type: gear
+  category: adventuring
+  costCp: 10000
+  text: A Magnifying Glass grants Advantage on any ability check made to appraise or inspect a highly detailed item. Lighting a fire with a Magnifying Glass requires light as bright as sunlight to focus, tinder to ignite, and about 5 minutes for the fire to ignite.
+- id: srd52:item/manacles
+  name: Manacles
+  type: gear
+  category: adventuring
+  costCp: 200
+  weightLb: 6
+  text: As a Utilize action, you can use Manacles to bind an unwilling Small or Medium creature within 5 feet of yourself that has the Grappled, Incapacitated, or Restrained condition if you succeed on a DC 13
+- id: srd52:item/map
+  name: Map
+  type: gear
+  category: adventuring
+  costCp: 100
+  text: If you consult an accurate Map, you gain a +5 bonus to Wisdom (Survival) checks you make to find your way in the place represented on it.
+- id: srd52:item/mason-s-tools
+  name: Mason’s Tools
+  type: tool
+  ability: str
+  costCp: 1000
+  artisan: true
+  text: "Ability: Strength Weight: 8 lb. Utilize: Chisel a symbol or hole in stone (DC 10) Craft: Block and Tackle"
+- id: srd52:item/mastiff
+  name: Mastiff
+  type: gear
+  category: mount
+  costCp: 2500
+  weightLb: 195
+- id: srd52:item/maul
+  name: Maul
+  type: weapon
+  category: martial
+  damage:
+    dice: 2d6
+    type: bludgeoning
+  properties:
+    - heavy
+    - twoHanded
+  mastery: topple
+  costCp: 1000
+  weightLb: 10
+- id: srd52:item/mirror
+  name: Mirror
+  type: gear
+  category: adventuring
+  costCp: 500
+  weightLb: 0.5
+  text: A handheld steel Mirror is useful for personal cosmetics but also for peeking around corners and reflecting light as a signal.
+- id: srd52:item/morningstar
+  name: Morningstar
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d8
+    type: piercing
+  properties: []
+  mastery: sap
+  costCp: 1500
+  weightLb: 4
+- id: srd52:item/mule
+  name: Mule
+  type: gear
+  category: mount
+  costCp: 800
+  weightLb: 420
+- id: srd52:item/musical-instrument
+  name: Musical Instrument
+  type: tool
+  ability: cha
+  text: "Ability: Charisma Weight: Varies Utilize: Play a known tune (DC 10), or improvise a song (DC 15) Variants: Bagpipes (30 GP, 6 lb.), drum (6 GP, 3 lb.), dul- cimer (25 GP, 10 lb.), flute (2 GP, 1 lb.), horn (3 GP, 2 lb.), lute (35 GP, 2 lb.), lyre (30 GP, 2 lb.), pan flute (12 GP, 2 lb.), shawm (2 GP, 1 lb.), viol (30 GP, 1 lb.)"
+- id: srd52:item/musket
+  name: Musket
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d12
+    type: piercing
+  properties:
+    - ammunition
+    - loading
+    - twoHanded
+  mastery: slow
+  costCp: 50000
+  weightLb: 10
+  range:
+    normal: 40
+    long: 120
+- id: srd52:item/navigator-s-tools
+  name: Navigator’s Tools
+  type: tool
+  ability: wis
+  costCp: 2500
+  text: "Ability: Wisdom Weight: 2 lb. Utilize: Plot a course (DC 10), or determine position by stargazing (DC 15)"
+- id: srd52:item/needles
+  name: Needles
+  type: gear
+  category: ammunition
+  costCp: 100
+  weightLb: 1
+- id: srd52:item/net
+  name: Net
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 3
+  text: When you take the Attack action, you can replace one of your attacks with throwing a Net. Target a creature you can see within 15 feet of yourself. The target must succeed on a Dexterity saving throw (DC 8 plus your Dexterity modifier and Proficiency Bonus) or have the Restrained condition until it escapes. The target succeeds automatically if it is Huge or larger. To escape, the target or a creature within 5 feet of it must take an action to make a DC 10 Strength (Athletics) check, freeing the Restrained creature on a success. Destroying the Net (AC 10; 5 HP; Immunity to Bludgeoning, Poison, and Psychic damage) also frees the target, ending the effect.
+- id: srd52:item/oil
+  name: Oil
+  type: gear
+  category: adventuring
+  costCp: 10
+  weightLb: 1
+  text: You can douse a creature, object, or space with Oil or use it as fuel, as detailed below. Dousing a Creature or an Object. When you take the Attack action, you can replace one of your attacks with throwing an Oil flask. Target one creature or object within 20 feet of yourself. The target must succeed on a Dexterity saving throw (DC 8 plus your Dexterity modifier and Proficiency Bonus) or be covered in oil. If the target takes Fire damage before the oil dries (after 1 minute), the target takes an extra 5 Fire damage from burning oil. Dousing a Space. You can take the Utilize action to pour an Oil flask on level ground to cover a 5-foot-square area within 5 feet of yourself. If lit, the oil burns until the end of the turn 2 rounds from when the oil was lit (or 12 seconds) and deals 5 Fire damage to any creature that enters the area or ends its turn there. A creature can take this damage only once per turn.
+- id: srd52:item/orb
+  name: Orb
+  type: gear
+  category: focus
+  costCp: 2000
+  weightLb: 3
+- id: srd52:item/padded-armor
+  name: Padded Armor
+  type: armor
+  armorType: light
+  stealthDisadvantage: true
+  base: 11
+  addDex: true
+  costCp: 500
+  weightLb: 8
+- id: srd52:item/painter-s-supplies
+  name: Painter’s Supplies
+  type: tool
+  ability: wis
+  costCp: 1000
+  artisan: true
+  text: "Ability: Wisdom Weight: 5 lb. Utilize: Paint a recognizable image of something you’ve seen (DC 10) Craft: Druidic Focus, Holy Symbol"
+- id: srd52:item/paper
+  name: Paper
+  type: gear
+  category: adventuring
+  costCp: 20
+  text: One sheet of Paper can hold about 250 handwritten words.
+- id: srd52:item/parchment
+  name: Parchment
+  type: gear
+  category: adventuring
+  costCp: 10
+  text: One sheet of Parchment can hold about 250 handwritten words.
+- id: srd52:item/perfume
+  name: Perfume
+  type: gear
+  category: adventuring
+  costCp: 500
+  text: Perfume comes in a 4-ounce vial. For 1 hour after applying Perfume to yourself, you have Advantage on Charisma (Persuasion) checks made to influence an Indifferent Humanoid within 5 feet of yourself.
+- id: srd52:item/pike
+  name: Pike
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d10
+    type: piercing
+  properties:
+    - heavy
+    - reach
+    - twoHanded
+  mastery: push
+  costCp: 500
+  weightLb: 18
+- id: srd52:item/pistol
+  name: Pistol
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d10
+    type: piercing
+  properties:
+    - ammunition
+    - loading
+  mastery: vex
+  costCp: 25000
+  weightLb: 3
+  range:
+    normal: 30
+    long: 90
+- id: srd52:item/plate-armor
+  name: Plate Armor
+  type: armor
+  armorType: heavy
+  stealthDisadvantage: true
+  base: 18
+  addDex: false
+  costCp: 150000
+  weightLb: 65
+- id: srd52:item/poison-basic
+  name: Poison, Basic
+  type: gear
+  category: adventuring
+  costCp: 10000
+  text: As a Bonus Action, you can use a vial of Basic Poison to coat one weapon or up to three pieces of ammunition. A creature that takes Piercing or Slashing damage from the poisoned weapon or ammunition takes an extra 1d4 Poison damage. Once applied, the poison retains potency for 1 minute or until its damage is dealt, whichever comes first.
+- id: srd52:item/poisoner-s-kit
+  name: Poisoner’s Kit
+  type: tool
+  ability: int
+  costCp: 5000
+  text: "Ability: Intelligence Weight: 2 lb. Utilize: Detect a poisoned object (DC 10) Craft: Basic Poison"
+- id: srd52:item/pole
+  name: Pole
+  type: gear
+  category: adventuring
+  costCp: 5
+  weightLb: 7
+  text: A Pole is 10 feet long. You can use it to touch something up to 10 feet away. If you must make a Strength (Athletics) check as part of a High or Long Jump, you can use the Pole to vault, giving yourself Advantage on the check.
+- id: srd52:item/pony
+  name: Pony
+  type: gear
+  category: mount
+  costCp: 3000
+  weightLb: 225
+- id: srd52:item/pot-iron
+  name: Pot, Iron
+  type: gear
+  category: adventuring
+  costCp: 200
+  weightLb: 10
+  text: An Iron Pot holds up to 1 gallon.
+- id: srd52:item/potter-s-tools
+  name: Potter’s Tools
+  type: tool
+  ability: int
+  costCp: 1000
+  artisan: true
+  text: "Ability: Intelligence Weight: 3 lb. Utilize: Discern what a ceramic object held in the past 24 hours (DC 15) Craft: Jug, Lamp"
+- id: srd52:item/pouch
+  name: Pouch
+  type: gear
+  category: adventuring
+  costCp: 50
+  weightLb: 1
+  text: A Pouch holds up to 6 pounds within one-fifth of a cubic foot.
+- id: srd52:item/priest-s-pack
+  name: Priest’s Pack
+  type: gear
+  category: pack
+  costCp: 3300
+  weightLb: 29
+  text: "A Priest’s Pack contains the following items: Backpack, Blanket, Holy Water, Lamp, 7 days of Rations, Robe, and Tinderbox."
+- id: srd52:item/quiver
+  name: Quiver
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 1
+  text: A Quiver holds up to 20 Arrows.
+- id: srd52:item/ram-portable
+  name: Ram, Portable
+  type: gear
+  category: adventuring
+  costCp: 400
+  weightLb: 35
+  text: You can use a Portable Ram to break down doors. When doing so, you gain a +4 bonus to the Strength check. One other character can help you use the ram, giving you Advantage on this check.
+- id: srd52:item/rapier
+  name: Rapier
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d8
+    type: piercing
+  properties:
+    - finesse
+  mastery: vex
+  costCp: 2500
+  weightLb: 2
+- id: srd52:item/rations
+  name: Rations
+  type: gear
+  category: adventuring
+  costCp: 50
+  weightLb: 2
+  text: Rations consist of travel-ready food, including jerky, dried fruit, hardtack, and nuts. See “Malnutrition” in “Rules Glossary” for the risks of not eating.
+- id: srd52:item/reliquary
+  name: Reliquary (held)
+  type: gear
+  category: focus
+  costCp: 500
+  weightLb: 2
+- id: srd52:item/ring-mail
+  name: Ring Mail
+  type: armor
+  armorType: heavy
+  stealthDisadvantage: true
+  base: 14
+  addDex: false
+  costCp: 3000
+  weightLb: 40
+- id: srd52:item/robe
+  name: Robe
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 4
+  text: A Robe has vocational or ceremonial significance. Some events and locations admit only people wearing a Robe bearing certain colors or symbols.
+- id: srd52:item/rod
+  name: Rod
+  type: gear
+  category: focus
+  costCp: 1000
+  weightLb: 2
+- id: srd52:item/rope
+  name: Rope
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 5
+  text: As a Utilize action, you can tie a knot with Rope if you succeed on a DC 10 Dexterity (Sleight of Hand) check. The Rope can be burst with a successful DC 20 Strength (Athletics) check. You can bind an unwilling creature with the Rope only if the creature has the Grappled, Incapacitated, or Restrained condition. If the creature’s legs are bound, the creature has the Restrained condition until it escapes. Escaping the Rope requires the creature to make a successful DC 15 Dexterity (Acrobatics) check as an action.
+- id: srd52:item/rowboat
+  name: Rowboat
+  type: gear
+  category: vehicle
+  costCp: 5000
+- id: srd52:item/sack
+  name: Sack
+  type: gear
+  category: adventuring
+  costCp: 1
+  weightLb: 0.5
+  text: A Sack holds up to 30 pounds within 1 cubic foot.
+- id: srd52:item/saddle-exotic
+  name: Saddle, Exotic
+  type: gear
+  category: tack
+  costCp: 6000
+  weightLb: 40
+- id: srd52:item/saddle-military
+  name: Saddle, Military
+  type: gear
+  category: tack
+  costCp: 2000
+  weightLb: 30
+- id: srd52:item/saddle-riding
+  name: Saddle, Riding
+  type: gear
+  category: tack
+  costCp: 1000
+  weightLb: 25
+- id: srd52:item/sailing-ship
+  name: Sailing Ship
+  type: gear
+  category: vehicle
+  costCp: 1000000
+- id: srd52:item/scholar-s-pack
+  name: Scholar’s Pack
+  type: gear
+  category: pack
+  costCp: 4000
+  weightLb: 22
+  text: "A Scholar’s Pack contains the following items: Backpack, Book, Ink, Ink Pen, Lamp, 10 flasks of Oil, 10 sheets of Parchment, and Tinderbox."
+- id: srd52:item/scimitar
+  name: Scimitar
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d6
+    type: slashing
+  properties:
+    - finesse
+    - light
+  mastery: nick
+  costCp: 2500
+  weightLb: 3
+- id: srd52:item/shovel
+  name: Shovel
+  type: gear
+  category: adventuring
+  costCp: 200
+  weightLb: 5
+  text: Working for 1 hour, you can use a Shovel to dig a hole that is 5 feet on each side in soil or similar material.
+- id: srd52:item/sickle
+  name: Sickle
+  type: weapon
+  category: simple
+  damage:
+    dice: 1d4
+    type: slashing
+  properties:
+    - light
+  mastery: nick
+  costCp: 100
+  weightLb: 2
+- id: srd52:item/signal-whistle
+  name: Signal Whistle
+  type: gear
+  category: adventuring
+  costCp: 5
+  text: When blown as a Utilize action, a Signal Whistle produces a sound that can be heard up to 600 feet away.
+- id: srd52:item/sled
+  name: Sled
+  type: gear
+  category: tack
+  costCp: 2000
+  weightLb: 300
+- id: srd52:item/sling
+  name: Sling
+  type: weapon
+  category: simple
+  damage:
+    dice: 1d4
+    type: bludgeoning
+  properties:
+    - ammunition
+  mastery: slow
+  costCp: 10
+  range:
+    normal: 30
+    long: 120
+- id: srd52:item/smith-s-tools
+  name: Smith’s Tools
+  type: tool
+  ability: str
+  costCp: 2000
+  artisan: true
+  text: "Ability: Strength Weight: 8 lb. Utilize: Pry open a door or container (DC 20)"
+- id: srd52:item/spear
+  name: Spear
+  type: weapon
+  category: simple
+  damage:
+    dice: 1d6
+    type: piercing
+  properties:
+    - thrown
+    - versatile
+  mastery: sap
+  range:
+    normal: 20
+    long: 60
+  costCp: 100
+  weightLb: 3
+- id: srd52:item/spell-scroll-cantrip
+  name: Spell Scroll (Cantrip)
+  type: gear
+  category: adventuring
+  costCp: 3000
+- id: srd52:item/spell-scroll-level-1
+  name: Spell Scroll (Level 1)
+  type: gear
+  category: adventuring
+  costCp: 5000
+- id: srd52:item/spikes-iron
+  name: Spikes, Iron
+  type: gear
+  category: adventuring
+  costCp: 100
+  weightLb: 5
+  text: Iron Spikes come in bundles of ten. As a Utilize action, you can use a blunt object, such as a Light Hammer, to hammer a spike into wood, earth, or a similar material. You can do so to jam a door shut or to then tie a Rope or Chain to the Spike.
+- id: srd52:item/splint-armor
+  name: Splint Armor
+  type: armor
+  armorType: heavy
+  stealthDisadvantage: true
+  base: 17
+  addDex: false
+  costCp: 20000
+  weightLb: 60
+- id: srd52:item/sprig-of-mistletoe
+  name: Sprig of mistletoe
+  type: gear
+  category: focus
+  costCp: 100
+- id: srd52:item/spyglass
+  name: Spyglass
+  type: gear
+  category: adventuring
+  costCp: 100000
+  weightLb: 1
+  text: Objects viewed through a Spyglass are magnified to twice their size.
+- id: srd52:item/stabling-per-day
+  name: Stabling per day
+  type: gear
+  category: tack
+  costCp: 50
+- id: srd52:item/staff
+  name: Staff (also a Quarterstaff)
+  type: gear
+  category: focus
+  costCp: 500
+  weightLb: 4
+- id: srd52:item/string
+  name: String
+  type: gear
+  category: adventuring
+  costCp: 10
+  text: String is 10 feet long. You can tie a knot in it as a Utilize action.
+- id: srd52:item/studded-leather-armor
+  name: Studded Leather Armor
+  type: armor
+  armorType: light
+  base: 12
+  addDex: true
+  costCp: 4500
+  weightLb: 13
+- id: srd52:item/tent
+  name: Tent
+  type: gear
+  category: adventuring
+  costCp: 200
+  weightLb: 20
+  text: A Tent sleeps up to two Small or Medium creatures.
+- id: srd52:item/tinderbox
+  name: Tinderbox
+  type: gear
+  category: adventuring
+  costCp: 50
+  weightLb: 1
+  text: A Tinderbox is a small container holding flint, fire steel, and tinder (usually dry cloth soaked in light oil) used to kindle a fire. Using it to light a Candle, Lamp, Lantern, or Torch—or anything else with exposed fuel—takes a Bonus Action. Lighting any other fire takes 1 minute.
+- id: srd52:item/tinker-s-tools
+  name: Tinker’s Tools
+  type: tool
+  ability: dex
+  costCp: 5000
+  artisan: true
+  text: "Ability: Dexterity Weight: 10 lb. Utilize: Assemble a Tiny item composed of scrap, which falls apart in 1 minute (DC 20) Craft: Musket, Pistol, Bell, Bullseye Lantern, Flask, Hooded Lantern, Hunting Trap, Lock, Manacles, Mirror, Shovel, Signal Whistle, Tinderbox"
+- id: srd52:item/torch
+  name: Torch
+  type: gear
+  category: adventuring
+  costCp: 1
+  weightLb: 1
+  text: A Torch burns for 1 hour, casting Bright Light in a 20-foot radius and Dim Light for an additional 20 feet. When you take the Attack action, you can attack with the Torch, using it as a Simple Melee weapon. On a hit, the target takes 1 Fire damage.
+- id: srd52:item/trident
+  name: Trident
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d8
+    type: piercing
+  properties:
+    - thrown
+    - versatile
+  mastery: topple
+  range:
+    normal: 20
+    long: 60
+  costCp: 500
+  weightLb: 4
+- id: srd52:item/vial
+  name: Vial
+  type: gear
+  category: adventuring
+  costCp: 100
+  text: A Vial holds up to 4 ounces.
+- id: srd52:item/wagon
+  name: Wagon
+  type: gear
+  category: tack
+  costCp: 3500
+  weightLb: 400
+- id: srd52:item/wand
+  name: Wand
+  type: gear
+  category: focus
+  costCp: 1000
+  weightLb: 1
+- id: srd52:item/war-pick
+  name: War Pick
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d8
+    type: piercing
+  properties:
+    - versatile
+  mastery: sap
+  costCp: 500
+  weightLb: 2
+- id: srd52:item/warhammer
+  name: Warhammer
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d8
+    type: bludgeoning
+  properties:
+    - versatile
+  mastery: push
+  costCp: 1500
+  weightLb: 5
+- id: srd52:item/warhorse
+  name: Warhorse
+  type: gear
+  category: mount
+  costCp: 40000
+  weightLb: 540
+- id: srd52:item/warship
+  name: Warship
+  type: gear
+  category: vehicle
+  costCp: 2500000
+- id: srd52:item/waterskin
+  name: Waterskin
+  type: gear
+  category: adventuring
+  costCp: 20
+  weightLb: 5
+  text: A Waterskin holds up to 4 pints. If you don’t drink sufficient water, you risk dehydration (see “Rules Glossary”).
+- id: srd52:item/weaver-s-tools
+  name: Weaver’s Tools
+  type: tool
+  ability: dex
+  costCp: 100
+  artisan: true
+  text: "Ability: Dexterity Weight: 5 lb. Utilize: Mend a tear in clothing (DC 10), or sew a Tiny design (DC 10) Craft: Padded Armor, Basket, Bedroll, Blanket, Fine Clothes, Net, Robe, Rope, Sack, String, Tent, Traveler’s Clothes"
+- id: srd52:item/whip
+  name: Whip
+  type: weapon
+  category: martial
+  damage:
+    dice: 1d4
+    type: slashing
+  properties:
+    - finesse
+    - reach
+  mastery: slow
+  costCp: 200
+  weightLb: 3
+- id: srd52:item/woodcarver-s-tools
+  name: Woodcarver’s Tools
+  type: tool
+  ability: dex
+  costCp: 100
+  artisan: true
+  text: "Ability: Dexterity Weight: 5 lb. Utilize: Carve a pattern in wood (DC 10) Craft: Club, Greatclub, Quarterstaff, Ranged weapons (except Pistol, Musket, and Sling), Arcane Focus, Arrows, Bolts, Druidic Focus, Ink Pen, Needles"
+- id: srd52:item/wooden-staff
+  name: Wooden staff (also a Quarterstaff)
+  type: gear
+  category: focus
+  costCp: 500
+  weightLb: 4
+- id: srd52:item/yew-wand
+  name: Yew wand
+  type: gear
+  category: focus
+  costCp: 1000
+  weightLb: 1
