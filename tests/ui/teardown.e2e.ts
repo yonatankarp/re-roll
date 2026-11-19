@@ -1,4 +1,5 @@
 import { type Page, expect, test } from "./fixtures.ts";
+import { playUntil } from "./onward.ts";
 
 // What the game screen leaves behind (issue #217): nothing of the board sounds once the player has gone
 // back to the menu, and a drag the browser cancelled never moves the fighter.
@@ -18,14 +19,7 @@ async function intoFight(page: Page): Promise<void> {
     .getByRole("button", { name: /Perception ?\] Check the treeline$/ })
     .click();
   const map = page.locator(".dnd-cell").first();
-  const onward = page.getByRole("button", {
-    name: /^(Carry on|Drive them off)$/,
-  });
-  await expect(async () => {
-    if (await onward.first().isVisible()) await onward.first().click();
-    else if (!(await map.isVisible())) await page.keyboard.press("Enter");
-    await expect(map).toBeVisible({ timeout: 300 });
-  }).toPass({ timeout: 30_000 });
+  await playUntil(page, () => map.isVisible());
 }
 
 test("leaving for the menu while the board plays ends its sounds", async ({
