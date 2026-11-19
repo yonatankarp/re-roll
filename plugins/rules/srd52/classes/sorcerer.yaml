@@ -1,0 +1,336 @@
+- id: srd52:class/sorcerer
+  name: Sorcerer
+  hitDie: d6
+  primaryAbilities:
+    - cha
+  savingThrows:
+    - con
+    - cha
+  weapons:
+    - simple
+  armor: []
+  spellcasting:
+    ability: cha
+  swaps:
+    cantrips: levelUp
+    spells: levelUp
+    options: levelUp
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/spellcasting
+        - srd52:feature/innate-sorcery
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            - arcana
+            - deception
+            - insight
+            - intimidation
+            - persuasion
+            - religion
+      slots:
+        - 2
+      scaling:
+        cantrips: 4
+        preparedSpells: 2
+    - level: 2
+      grants:
+        - srd52:feature/font-of-magic
+        - srd52:feature/metamagic
+      slots:
+        - 3
+      scaling:
+        sorceryPoints: 2
+        cantrips: 4
+        preparedSpells: 4
+      choices:
+        - kind: option
+          id: metamagic
+          count: 2
+          from:
+            - srd52:feature/metamagic-careful-spell
+            - srd52:feature/metamagic-distant-spell
+            - srd52:feature/metamagic-empowered-spell
+            - srd52:feature/metamagic-extended-spell
+            - srd52:feature/metamagic-heightened-spell
+            - srd52:feature/metamagic-quickened-spell
+            - srd52:feature/metamagic-seeking-spell
+            - srd52:feature/metamagic-subtle-spell
+            - srd52:feature/metamagic-transmuted-spell
+            - srd52:feature/metamagic-twinned-spell
+    - level: 3
+      grants:
+        - srd52:feature/sorcerer-subclass
+      slots:
+        - 4
+        - 2
+      scaling:
+        sorceryPoints: 3
+        cantrips: 4
+        preparedSpells: 6
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+      scaling:
+        sorceryPoints: 4
+        cantrips: 5
+        preparedSpells: 7
+    - level: 5
+      grants:
+        - srd52:feature/sorcerous-restoration
+      slots:
+        - 4
+        - 3
+        - 2
+      scaling:
+        sorceryPoints: 5
+        cantrips: 5
+        preparedSpells: 9
+    - level: 6
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+      scaling:
+        sorceryPoints: 6
+        cantrips: 5
+        preparedSpells: 10
+    - level: 7
+      grants:
+        - srd52:feature/sorcery-incarnate
+      slots:
+        - 4
+        - 3
+        - 3
+        - 1
+      scaling:
+        sorceryPoints: 7
+        cantrips: 5
+        preparedSpells: 11
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 2
+      scaling:
+        sorceryPoints: 8
+        cantrips: 5
+        preparedSpells: 12
+    - level: 9
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 1
+      scaling:
+        sorceryPoints: 9
+        cantrips: 5
+        preparedSpells: 14
+    - level: 10
+      grants:
+        - srd52:feature/metamagic
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+      scaling:
+        sorceryPoints: 10
+        cantrips: 6
+        preparedSpells: 15
+      choices:
+        - kind: option
+          id: metamagic
+          count: 2
+          from:
+            - srd52:feature/metamagic-careful-spell
+            - srd52:feature/metamagic-distant-spell
+            - srd52:feature/metamagic-empowered-spell
+            - srd52:feature/metamagic-extended-spell
+            - srd52:feature/metamagic-heightened-spell
+            - srd52:feature/metamagic-quickened-spell
+            - srd52:feature/metamagic-seeking-spell
+            - srd52:feature/metamagic-subtle-spell
+            - srd52:feature/metamagic-transmuted-spell
+            - srd52:feature/metamagic-twinned-spell
+    - level: 11
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+      scaling:
+        sorceryPoints: 11
+        cantrips: 6
+        preparedSpells: 16
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+      scaling:
+        sorceryPoints: 12
+        cantrips: 6
+        preparedSpells: 16
+    - level: 13
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+      scaling:
+        sorceryPoints: 13
+        cantrips: 6
+        preparedSpells: 17
+    - level: 14
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+      scaling:
+        sorceryPoints: 14
+        cantrips: 6
+        preparedSpells: 17
+    - level: 15
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        sorceryPoints: 15
+        cantrips: 6
+        preparedSpells: 18
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        sorceryPoints: 16
+        cantrips: 6
+        preparedSpells: 18
+    - level: 17
+      grants:
+        - srd52:feature/metamagic
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+        - 1
+      scaling:
+        sorceryPoints: 17
+        cantrips: 6
+        preparedSpells: 19
+      choices:
+        - kind: option
+          id: metamagic
+          count: 2
+          from:
+            - srd52:feature/metamagic-careful-spell
+            - srd52:feature/metamagic-distant-spell
+            - srd52:feature/metamagic-empowered-spell
+            - srd52:feature/metamagic-extended-spell
+            - srd52:feature/metamagic-heightened-spell
+            - srd52:feature/metamagic-quickened-spell
+            - srd52:feature/metamagic-seeking-spell
+            - srd52:feature/metamagic-subtle-spell
+            - srd52:feature/metamagic-transmuted-spell
+            - srd52:feature/metamagic-twinned-spell
+    - level: 18
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 1
+        - 1
+        - 1
+        - 1
+      scaling:
+        sorceryPoints: 18
+        cantrips: 6
+        preparedSpells: 20
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 2
+        - 1
+        - 1
+        - 1
+      scaling:
+        sorceryPoints: 19
+        cantrips: 6
+        preparedSpells: 21
+    - level: 20
+      grants:
+        - srd52:feature/arcane-apotheosis
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 3
+        - 2
+        - 2
+        - 1
+        - 1
+      scaling:
+        sorceryPoints: 20
+        cantrips: 6
+        preparedSpells: 22

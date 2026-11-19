@@ -720,7 +720,12 @@ export function runAdvanceTurn(
     return {
       events: [
         ...finished,
-        ...combatEnded(state, state.combat.canFlee ? "flee" : undefined),
+        ...combatEnded(
+          state,
+          state.combat.canFlee && !state.combat.standOffWins
+            ? "flee"
+            : undefined,
+        ),
       ],
     };
   }

@@ -1,4 +1,4 @@
-import { type Page, expect, test } from "@playwright/test";
+import { type Page, expect, test } from "./fixtures.ts";
 import { type Entries, savedFiles } from "./saved-files.ts";
 
 // Sent to the page as text, like the reader in saved-files.ts.

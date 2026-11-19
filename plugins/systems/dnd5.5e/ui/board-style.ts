@@ -169,6 +169,18 @@ const BOARD_CSS = `
   pointer-events: none;
 }
 .dnd-token[data-side="party"] .dnd-foe { display: none; }
+/* A badge for each condition along the token's top edge. */
+.dnd-badges {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--disc) * -0.12);
+  display: flex;
+  gap: 1px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.dnd-badges svg { width: max(10px, calc(var(--disc) * 0.26)); height: max(10px, calc(var(--disc) * 0.26)); }
+.dnd-token.down .dnd-badges { display: none; }
 .dnd-token[data-level="low"] .dnd-ring { --hp-color: #e0533f; }
 .dnd-token.down .dnd-ring { opacity: 0; }
 /* The name, HP and conditions, on hover or under the keyboard cursor. */

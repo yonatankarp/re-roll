@@ -1,0 +1,300 @@
+- id: srd52:feature/favored-enemy
+  name: Favored Enemy
+  text: You always have the Hunter’s Mark spell prepared. You can cast it twice without expending a spell slot, and you regain all expended uses of this ability when you finish a Long Rest. The number of times you can cast the spell without a spell slot increases when you reach certain Ranger levels, as shown in the Favored Enemy column of the Ranger Features table.
+  automation: full
+  spells:
+    "1":
+      - srd52:spell/hunter-s-mark
+  freeCast:
+    resource: favored-enemy
+  resources:
+    - id: favored-enemy
+      max:
+        base: 0
+        add:
+          - kind: scaling
+            key: favoredEnemy
+      recharge:
+        - on: longRest
+          amount: all
+- id: srd52:feature/deft-explorer
+  name: Deft Explorer
+  text: Thanks to your travels, you gain the following benefits. Expertise. Choose one of your skill proficiencies with which you lack Expertise. You gain Expertise in that skill. Languages. You know two languages of your choice from the language tables in “Character Creation.”
+  automation: full
+- id: srd52:feature/ranger-fighting-style
+  name: Fighting Style
+  text: You gain a Fighting Style feat of your choice (see “Feats”). Instead of choosing one of those feats, you can choose the option below. Druidic Warrior. You learn two Druid cantrips of your choice (see the Druid class’s section for a list of Druid spells). Guidance and Starry Wisp are recommended. The chosen cantrips count as Ranger spells for you, and Wisdom is your spellcasting ability for them. Whenever you gain a Ranger level, you can replace one of these cantrips with another Druid cantrip.
+  automation: full
+  variants:
+    - id: feat
+      name: Fighting Style feat
+      choices:
+        - kind: feat
+          id: fighting-style
+          category: fightingStyle
+    - id: druidic-warrior
+      name: Druidic Warrior
+      choices:
+        - kind: spells
+          id: cantrips
+          count: 2
+          maxLevel: 0
+          list: srd52:class/druid
+          ability: wis
+          swap: levelUp
+- id: srd52:feature/ranger-subclass
+  name: Ranger Subclass
+  text: You gain a Ranger subclass of your choice. The Hunter subclass is detailed after this class’s description. A subclass is a specialization that grants you features at certain Ranger levels. For the rest of your career, you gain each of your subclass’s features that are of your Ranger level or lower.
+  automation: full
+- id: srd52:feature/roving
+  name: Roving
+  text: Your Speed increases by 10 feet while you aren’t wearing Heavy armor. You also have a Climb Speed and a Swim Speed equal to your Speed.
+  automation: full
+  passives:
+    - kind: modifier
+      modifier:
+        kind: bonus
+        to: speed
+        amount:
+          bonus:
+            base: 10
+      armor: noHeavy
+    - kind: modifier
+      modifier:
+        kind: movementMode
+        mode: climb
+    - kind: modifier
+      modifier:
+        kind: movementMode
+        mode: swim
+- id: srd52:feature/tireless
+  name: Tireless
+  text: Primal forces now help fuel you on your journeys, granting you the following benefits. Temporary Hit Points. As a Magic action, you can give yourself a number of Temporary Hit Points equal to 1d8 plus your Wisdom modifier (minimum of 1). You can use this action a number of times equal to your Wisdom modifier (minimum of once), and you regain all expended uses when you finish a Long Rest. Decrease Exhaustion. Whenever you finish a Short Rest, your Exhaustion level, if any, decreases by 1.
+  automation: full
+  resources:
+    - id: tireless
+      max:
+        base: 0
+        add:
+          - kind: abilityMod
+            ability: wis
+        min: 1
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: tireless
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: tempHp
+            amount:
+              dice: 1d8
+              bonus:
+                add:
+                  - kind: abilityMod
+                    ability: wis
+                min: 1
+  passives:
+    - kind: restExhaustion
+- id: srd52:feature/relentless-hunter
+  name: Relentless Hunter
+  text: Taking damage can’t break your Concentration on Hunter’s Mark.
+  automation: full
+  passives:
+    - kind: unshakableFocus
+      spells:
+        - srd52:spell/hunter-s-mark
+        - srd52:spell/hunter-s-mark
+- id: srd52:feature/nature-s-veil
+  name: Nature’s Veil
+  text: You invoke spirits of nature to magically hide yourself. As a Bonus Action, you can give yourself the Invisible condition until the end of your next turn. You can use this feature a number of times equal to your Wisdom modifier (minimum of once), and you regain all expended uses when you finish a Long Rest.
+  automation: full
+  resources:
+    - id: natures-veil
+      max:
+        base: 0
+        add:
+          - kind: abilityMod
+            ability: wis
+        min: 1
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - bonusAction
+        - resource: natures-veil
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: applyCondition
+            condition: invisible
+            duration:
+              until: yourNextTurnEnd
+- id: srd52:feature/precise-hunter
+  name: Precise Hunter
+  text: You have Advantage on attack rolls against the creature currently marked by your Hunter’s Mark.
+  automation: full
+  passives:
+    - kind: attackAdvantage
+      when: marked
+      against:
+        - srd52:spell/hunter-s-mark
+        - srd52:spell/hunter-s-mark
+        - srd52:feature/favored-enemy
+- id: srd52:feature/feral-senses
+  name: Feral Senses
+  text: Your connection to the forces of nature grants you Blindsight with a range of 30 feet.
+  automation: full
+  passives:
+    - kind: modifier
+      modifier:
+        kind: sense
+        sense: blindsight
+        feet: 30
+- id: srd52:feature/foe-slayer
+  name: Foe Slayer
+  text: The damage die of your Hunter’s Mark is a d10 rather than a d6.
+  automation: full
+  redice:
+    srd52:spell/hunter-s-mark: 1d10
+- id: srd52:feature/hunter-s-lore
+  name: Hunter’s Lore
+  text: You can call on the forces of nature to reveal certain strengths and weaknesses of your prey. While a creature is marked by your Hunter’s Mark, you know whether that creature has any Immunities, Resistances, or Vulnerabilities, and if the creature has any, you know what they are.
+  automation: full
+- id: srd52:feature/hunter-s-prey
+  name: Hunter’s Prey
+  text: You gain one of the following feature options of your choice. Whenever you finish a Short or Long Rest, you can replace the chosen option with the other one. Colossus Slayer. Your tenacity can wear down even the most resilient foes. When you hit a creature with a weapon, the weapon deals an extra 1d8 damage to the target if it’s missing any of its Hit Points. You can deal this extra damage only once per turn. Horde Breaker. Once on each of your turns when you make an attack with a weapon, you can make another attack with the same weapon against a different creature that is within 5 feet of the original target, that is within the weapon’s range, and that you haven’t attacked this turn.
+  automation: partial
+  variantSwap: shortRest
+  variants:
+    - id: colossus-slayer
+      name: Colossus Slayer
+      passives:
+        - kind: extraDamage
+          dice: 1d8
+          when: targetHurt
+          with: weapon
+          oncePerTurn: true
+    - id: horde-breaker
+      name: Horde Breaker
+      passives:
+        - kind: missReroll
+          with: weapon
+          oncePerTurn: true
+          onceKey: horde-breaker
+          ownTurn: true
+          newTarget: 5
+      activations:
+        - cost: []
+          oncePerTurn: horde-breaker
+          trigger:
+            afterHit: weapon
+            near: 5
+          targeting:
+            creatures: 1
+            range: 120
+            side: enemy
+          resolution:
+            kind: automatic
+            effects:
+              - kind: weaponAttack
+- id: srd52:feature/defensive-tactics
+  name: Defensive Tactics
+  text: You gain one of the following feature options of your choice. Whenever you finish a Short or Long Rest, you can replace the chosen option with the other one. Escape the Horde. Opportunity Attacks have Disadvantage against you. Multiattack Defense. When a creature hits you with an attack roll, that creature has Disadvantage on all other attack rolls against you this turn.
+  automation: full
+  variantSwap: shortRest
+  variants:
+    - id: escape-the-horde
+      name: Escape the Horde
+      passives:
+        - kind: modifier
+          modifier:
+            kind: disadvantage
+            on: attacksAgainst
+            opportunity: true
+    - id: multiattack-defense
+      name: Multiattack Defense
+      activations:
+        - cost: []
+          trigger:
+            struck: true
+          targeting:
+            creatures: 1
+            range: 600
+            side: enemy
+          resolution:
+            kind: automatic
+            effects:
+              - kind: modifier
+                modifier:
+                  kind: disadvantage
+                  on: attacks
+                  casterOnly: true
+                duration:
+                  until: turnEnd
+- id: srd52:feature/superior-hunter-s-prey
+  name: Superior Hunter’s Prey
+  text: Once per turn when you deal damage to a creature marked by your Hunter’s Mark, you can also deal that spell’s extra damage to a different creature that you can see within 30 feet of the first creature.
+  automation: full
+  activations:
+    - cost: []
+      oncePerTurn: true
+      trigger:
+        afterHit: attack
+        near: 30
+        marked:
+          - srd52:spell/hunter-s-mark
+          - srd52:spell/hunter-s-mark
+          - srd52:feature/favored-enemy
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: automatic
+        damage:
+          - amount:
+              dice: 1d6
+            type: force
+        effects: []
+- id: srd52:feature/superior-hunter-s-defense
+  name: Superior Hunter’s Defense
+  text: |-
+    When you take damage, you can take a Reaction to give yourself Resistance to that damage and any other damage of the same type until the end of the current turn.
+
+    Rogue Core Rogue Traits Primary Ability
+
+    Choose 4: Acrobatics, Athletics, Deception, Insight, Intimidation, Investigation, Perception, Persuasion, Sleight of Hand, or Stealth
+
+    Weapon Proficiencies Simple weapons and Martial weapons that have the Finesse or Light property Tool Proficiencies
+
+    Choose A or B: (A) Leather Armor, 2 Daggers, Short­sword, Shortbow, 20 Arrows, Quiver, Thieves’ Tools, Burglar’s Pack, and 8 GP; or (B) 100 GP
+
+    Becoming a Rogue … As a Level 1 Character • Gain all the traits in the Core Rogue Traits table. • Gain the Rogue’s level 1 features, which are listed in the Rogue Features table.
+
+    • Gain the following traits from the Core Rogue Traits table: Hit Point Die, proficiency in one skill of your choice from the Rogue’s skill list, proficiency with Thieves’ Tools, and training with Light armor. • Gain the Rogue’s level 1 features, which are listed in the Rogue Features table.
+
+    As a Rogue, you gain the following class features when you reach the specified Rogue levels. These features are listed in the Rogue Features table.
+  automation: full
+  activations:
+    - cost:
+        - reaction
+      trigger:
+        damaged: true
+        before: true
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: resistTrigger
+            lasting:
+              until: turnEnd

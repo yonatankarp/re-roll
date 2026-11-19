@@ -1,0 +1,128 @@
+- id: srd52:feature/indomitable
+  name: Indomitable
+  text: If you fail a saving throw, you can reroll it with a bonus equal to your Fighter level. You must use the new roll, and you can’t use this feature again until you finish a Long Rest. You can use this feature twice before a Long Rest starting at level 13 and three times before a Long Rest starting at level 17.
+  automation: full
+  resources:
+    - id: indomitable
+      max:
+        base: 0
+        add:
+          - kind: scaling
+            key: indomitable
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - resource: indomitable
+      trigger:
+        rolled:
+          rolls:
+            - save
+          by: self
+          when: failed
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: reroll
+          - kind: rollBonus
+            amount:
+              bonus:
+                add:
+                  - kind: classLevel
+                    class: srd52:class/fighter
+- id: srd52:feature/tactical-master
+  name: Tactical Master
+  text: When you attack with a weapon whose mastery property you can use, you can replace that property with the Push, Sap, or Slow property for that attack.
+  automation: full
+  passives:
+    - kind: masterySwap
+      masteries:
+        - push
+        - sap
+        - slow
+- id: srd52:feature/two-extra-attacks
+  name: Two Extra Attacks
+  text: You can attack three times instead of once whenever you take the Attack action on your turn.
+  automation: full
+  passives:
+    - kind: multiattack
+      attacks: 3
+- id: srd52:feature/studied-attacks
+  name: Studied Attacks
+  text: You study your opponents and learn from each attack you make. If you make an attack roll against a creature and miss, you have Advantage on your next attack roll against that creature before the end of your next turn.
+  automation: full
+  passives:
+    - kind: missRider
+      effects:
+        - kind: modifier
+          modifier:
+            kind: advantage
+            on: attacksAgainst
+            once: true
+            casterOnly: true
+          duration:
+            until: yourNextTurnEnd
+- id: srd52:feature/epic-boon
+  name: Epic Boon
+  text: You gain an Epic Boon feat (see “Feats”) or another feat of your choice for which you qualify. Boon of Combat Prowess is recommended.
+  automation: full
+- id: srd52:feature/three-extra-attacks
+  name: Three Extra Attacks
+  text: You can attack four times instead of once whenever you take the Attack action on your turn.
+  automation: full
+  passives:
+    - kind: multiattack
+      attacks: 4
+- id: srd52:feature/additional-fighting-style
+  name: Additional Fighting Style
+  text: You gain another Fighting Style feat of your choice.
+  automation: full
+- id: srd52:feature/heroic-warrior
+  name: Heroic Warrior
+  text: The thrill of battle drives you toward victory. During combat, you can give yourself Heroic Inspiration whenever you start your turn without it.
+  automation: full
+  passives:
+    - kind: turnInspiration
+- id: srd52:feature/superior-critical
+  name: Superior Critical
+  text: Your attack rolls with weapons and Unarmed Strikes can now score a Critical Hit on a roll of 18–20 on the d20.
+  automation: full
+  passives:
+    - kind: criticalRange
+      from: 18
+- id: srd52:feature/survivor
+  name: Survivor
+  text: |-
+    You attain the pinnacle of resilience in battle, giving you these benefits. Defy Death. You have Advantage on Death Saving Throws. Moreover, when you roll 18–20 on a Death Saving Throw, you gain the benefit of rolling a 20 on it. Heroic Rally. At the start of each of your turns, you regain Hit Points equal to 5 plus your Constitution modifier if you are Bloodied and have at least 1 Hit Point.
+
+    Monk Core Monk Traits Primary Ability
+
+    Choose 2: Acrobatics, Athletics, History, Insight, Religion, or Stealth
+
+    Weapon Proficiencies Simple weapons and Martial weapons that have the Light property Tool Proficiencies
+
+    Choose one type of Artisan’s Tools or Musical Instrument (see “Equipment”)
+
+    Choose A or B: (A) Spear, 5 Daggers, Artisan’s Tools or Musical Instrument chosen for the tool proficiency above, Explorer’s Pack, and 11 GP; or (B) 50 GP
+
+    Becoming a Monk … As a Level 1 Character • Gain all the traits in the Core Monk Traits table. • Gain the Monk’s level 1 features, which are listed in the Monk Features table.
+
+    • Gain the Hit Point Die trait from the Core Monk Traits table. • Gain the Monk’s level 1 features, which are listed in the Monk Features table.
+
+    As a Monk, you gain the following class features when you reach the specified Monk levels. These features are listed in the Monk Features table.
+  automation: full
+  passives:
+    - kind: deathSaveAdvantage
+    - kind: deathSaveRoll
+      twentyFrom: 18
+    - kind: regeneration
+      hp:
+        bonus:
+          base: 5
+          add:
+            - kind: abilityMod
+              ability: con
+      bloodied: true

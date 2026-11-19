@@ -1,7 +1,7 @@
 - id: hallway
   title: The Hallway
   text: The hallway smells of cold ash and old roses.
-  art: assets/hallway.txt
+  art: assets/hallway.webp
   choices:
     - label: Try the cellar door
       effects:
@@ -17,6 +17,12 @@
 - id: cellar-door
   title: The Cellar Door
   text: The door is warm to the touch, and something knocks back.
+  textVariants:
+    - when: { kind: flag, flag: ghost-furious }
+      text: The door is warm to the touch, and something pounds back hard enough to rattle the hinges.
+    - when: { kind: flag, flag: ghost-mournful }
+      text: The door is warm to the touch, and something knocks back softly, slow as a dirge.
+  art: assets/cellar-door.webp
   choices:
     - label: "[Athletics] Force the lock"
       check: { skill: athletics, dc: 13 }
@@ -26,9 +32,19 @@
         # Each failure raises the dread by one, so the doors seal only after the party has kept trying.
         failure:
           - { kind: advanceClock, clock: rising-dread }
+    # The mournful ghost's knocking keeps a tune, which says who it is.
+    - label: Hum the knocking's tune back through the door
+      when:
+        all:
+          - { kind: flag, flag: ghost-mournful }
+          - { kind: flag, flag: hummed-back, is: false }
+      effects:
+        - { kind: reveal, secret: what-knocks }
+        - { kind: setFlag, flag: hummed-back }
 - id: footsteps-above
   title: Footsteps Above
   text: Slow footsteps cross the floor above, though the house has no upstairs.
+  art: assets/footsteps-above.webp
   choices:
     - label: Keep moving
       effects:
@@ -36,6 +52,8 @@
 - id: doors-seal
   title: The Doors Seal
   text: Every door in the house clicks shut at once.
+  art: assets/doors-seal.webp
 - id: escape
   title: Escape
   text: Cold air and starlight hit you as you stumble out onto Mere Lane.
+  art: assets/escape.webp

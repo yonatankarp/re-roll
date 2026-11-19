@@ -1,16 +1,10 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.ts";
 import { playUntil } from "./onward.ts";
 
-// Plays into the first fight of the shipped adventure by mouse, as a player would, and fails on any console error.
+// Plays into the first fight of the shipped adventure by mouse, as a player would.
 test("starts the shipped adventure and plays a turn on the map", async ({
   page,
 }) => {
-  const errors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
-  });
-  page.on("pageerror", (error) => errors.push(error.message));
-
   // A monster's first sight covers the page with its picture until a click, as a player would dismiss it.
   await page.addLocatorHandler(page.locator(".art-plate"), (plate) =>
     plate.click(),
@@ -57,19 +51,11 @@ test("starts the shipped adventure and plays a turn on the map", async ({
   await expect
     .poll(() => log.count(), { timeout: 15_000 })
     .toBeGreaterThan(before);
-
-  expect(errors).toEqual([]);
 });
 
 // Builds a character on the sheet: a change, Undo, Next through every part, point-buy from the review,
 // a name, then asks before the story's early ending.
 test("makes a character and confirms an early ending", async ({ page }) => {
-  const errors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
-  });
-  page.on("pageerror", (error) => errors.push(error.message));
-
   await page.goto("/");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
   await page.getByRole("button", { name: "Begin the adventure" }).click();
@@ -132,6 +118,4 @@ test("makes a character and confirms an early ending", async ({ page }) => {
     .click();
   await page.getByRole("button", { name: "End the adventure here" }).click();
   await expect(page.getByRole("button", { name: "Play again" })).toBeVisible();
-
-  expect(errors).toEqual([]);
 });

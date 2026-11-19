@@ -1,7 +1,8 @@
 import { createServer } from "node:net";
 import { defineConfig, devices } from "@playwright/test";
 
-// npm run test:ui serves the game on a free port, so it runs beside npm run ui and other checkouts.
+// npm run test:ui builds the game and serves the build on a free port, with the desktop app's CSP
+// (vite.config.ts's preview), so it runs beside npm run ui and other checkouts.
 async function freePort(): Promise<number> {
   return new Promise((done, fail) => {
     const server = createServer();
@@ -24,16 +25,22 @@ export default defineConfig({
   testDir: "tests/ui",
   testMatch: "*.e2e.ts", // not *.test.ts or *.spec.ts, which vitest would pick up
   forbidOnly: Boolean(process.env.CI),
+  timeout: 60_000, // WebKit on a CI runner plays the longer tests near the 30 s default
+  expect: { timeout: 10_000 }, // opening an adventure, with the whole SRD, can pass 5 s on a busy runner
   // A retry tells a flaky test from a broken one, and a test that passes only on its retry still fails the run.
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: Boolean(process.env.CI),
   reporter: process.env.CI ? "github" : "list",
   use: { baseURL: url, trace: "retain-on-failure" },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // WebKit is the engine of the desktop app's webview on macOS and Linux; Chromium is Windows' WebView2.
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+  ],
   webServer: {
-    command: `npm run ui -- --port ${process.env.RE_ROLL_UI_PORT}`,
+    command: `npm run ui:build && npx vite preview --config app/desktop/vite.config.ts --port ${process.env.RE_ROLL_UI_PORT}`,
     url,
     reuseExistingServer: false,
-    timeout: 120_000,
+    timeout: 300_000,
   },
 });

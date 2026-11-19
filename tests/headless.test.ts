@@ -203,7 +203,7 @@ describe("headless play of goblin-ambush", () => {
     expect(
       (play.view().systemState as { difficulty?: string }).difficulty,
     ).toBe("story");
-  }, 60_000);
+  }, 120_000); // the road's fights play on a map with cover, which takes Windows' runner past 45 s
 
   it("chooses only what is on screen", async () => {
     const play = await driver();

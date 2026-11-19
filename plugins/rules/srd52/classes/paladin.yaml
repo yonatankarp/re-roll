@@ -1,0 +1,252 @@
+- id: srd52:class/paladin
+  name: Paladin
+  hitDie: d10
+  primaryAbilities:
+    - str
+    - cha
+  savingThrows:
+    - wis
+    - cha
+  weapons:
+    - simple
+    - martial
+  armor:
+    - light
+    - medium
+    - heavy
+    - shield
+  spellcasting:
+    ability: cha
+  swaps:
+    spells: longRest
+    weaponMastery: prepare
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/lay-on-hands
+        - srd52:feature/spellcasting
+        - srd52:feature/weapon-mastery
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            - athletics
+            - insight
+            - intimidation
+            - medicine
+            - persuasion
+            - religion
+      slots:
+        - 2
+      scaling:
+        weaponMastery: 2
+        preparedSpells: 2
+    - level: 2
+      grants:
+        - srd52:feature/paladin-fighting-style
+        - srd52:feature/paladin-s-smite
+      slots:
+        - 2
+      scaling:
+        weaponMastery: 2
+        preparedSpells: 3
+    - level: 3
+      grants:
+        - srd52:feature/paladin-channel-divinity
+        - srd52:feature/paladin-subclass
+      slots:
+        - 3
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 2
+        preparedSpells: 4
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 3
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 2
+        preparedSpells: 5
+    - level: 5
+      grants:
+        - srd52:feature/extra-attack
+        - srd52:feature/faithful-steed
+      slots:
+        - 4
+        - 2
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 2
+        preparedSpells: 6
+    - level: 6
+      grants:
+        - srd52:feature/aura-of-protection
+      slots:
+        - 4
+        - 2
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 2
+        preparedSpells: 6
+    - level: 7
+      grants: []
+      slots:
+        - 4
+        - 3
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 2
+        preparedSpells: 7
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 2
+        preparedSpells: 7
+    - level: 9
+      grants:
+        - srd52:feature/abjure-foes
+      slots:
+        - 4
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 2
+        preparedSpells: 9
+    - level: 10
+      grants:
+        - srd52:feature/aura-of-courage
+      slots:
+        - 4
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 2
+        preparedSpells: 9
+    - level: 11
+      grants:
+        - srd52:feature/radiant-strikes
+      slots:
+        - 4
+        - 3
+        - 3
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 3
+        preparedSpells: 10
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 3
+        preparedSpells: 10
+    - level: 13
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 1
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 3
+        preparedSpells: 11
+    - level: 14
+      grants:
+        - srd52:feature/restoring-touch
+      slots:
+        - 4
+        - 3
+        - 3
+        - 1
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 3
+        preparedSpells: 11
+    - level: 15
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 3
+        preparedSpells: 12
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots:
+        - 4
+        - 3
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 3
+        preparedSpells: 12
+    - level: 17
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 1
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 3
+        preparedSpells: 14
+    - level: 18
+      grants:
+        - srd52:feature/aura-expansion
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 1
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 3
+        preparedSpells: 14
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 3
+        preparedSpells: 15
+    - level: 20
+      grants: []
+      slots:
+        - 4
+        - 3
+        - 3
+        - 3
+        - 2
+      scaling:
+        weaponMastery: 2
+        channelDivinity: 3
+        preparedSpells: 15

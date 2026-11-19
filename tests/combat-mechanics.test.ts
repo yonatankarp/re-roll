@@ -1386,7 +1386,8 @@ describe("choosing targets and aiming areas", () => {
     for (let count = 0; pending && count < 400; count += 1) {
       const { id, options, actor: who } = pending;
       const has = (option: string) => options.some((o) => o.id === option);
-      let chosen = options[0]?.id ?? "";
+      // Never flee: the road before the fight is a way out now, and this test stays in the fight.
+      let chosen = options.find((o) => o.id !== "flee")?.id ?? "";
       if (has("srd52:pregen/wizard")) chosen = "srd52:pregen/wizard";
       else if (who === PLAYER_ACTOR && !done.bless && has(`${bless}|pick`)) {
         chosen = `${bless}|pick`;
@@ -4832,14 +4833,16 @@ describe("ending, hiding and reshaping spells", () => {
   });
 
   it("turns a foe into the weakest Beast, until its borrowed Hit Points run out", async () => {
-    const run = arenaRun(await base(), {
-      "srd52:monster/test-rat": dummy("srd52:monster/test-rat", {
-        name: "Test Rat",
-        hp: 3,
-        creatureType: "beast",
-        text: "CR 0 (XP 10; PB +2)",
+    const run = onlyTestMonsters(
+      arenaRun(await base(), {
+        "srd52:monster/test-rat": dummy("srd52:monster/test-rat", {
+          name: "Test Rat",
+          hp: 3,
+          creatureType: "beast",
+          text: "CR 0 (XP 10; PB +2)",
+        }),
       }),
-    });
+    );
     const caster = hero(run);
     const target: Actor = {
       ...hero(run, { id: "b" }),
@@ -4883,6 +4886,17 @@ describe("ending, hiding and reshaping spells", () => {
     expect(back.hp).toBe(target.hp - 2);
     expect(back.activeEffects).toEqual([]);
   });
+});
+
+// Forms are picked from every monster loaded; these tests pick among their own made-up ones, not the SRD's bestiary.
+const onlyTestMonsters = (run: RunContext): RunContext => ({
+  ...run,
+  contentIds: () =>
+    run
+      .contentIds()
+      .filter(
+        (id) => !id.startsWith("srd52:monster/") || id.includes("/test-"),
+      ),
 });
 
 describe("choosing a form", () => {
@@ -4936,7 +4950,7 @@ describe("choosing a form", () => {
   });
 
   it("lets a caster pick its own form, the strongest first, and keep its mind and spells", async () => {
-    const run = arenaRun(await base(), blocks);
+    const run = onlyTestMonsters(arenaRun(await base(), blocks));
     const caster = hero(run, { spells: ["magic-missile"], level: 9 });
     const state = fight(caster, monster("a"));
     const cast = resolveAction(
@@ -4968,7 +4982,7 @@ describe("choosing a form", () => {
   });
 
   it("gives an ally a form within the spell's own limits", async () => {
-    const run = arenaRun(await base(), blocks);
+    const run = onlyTestMonsters(arenaRun(await base(), blocks));
     const caster = hero(run);
     const friend = hero(run, { id: "b" });
     const state = fight(caster, friend, monster("a"));

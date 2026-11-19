@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.ts";
 
 // Shows a made-up ruling beside the section it rules on (#130), a monster's family (#133) and what a section is (#134–#136), in a made-up library.
 const BOOK = "fixture-book";

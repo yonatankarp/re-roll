@@ -1,0 +1,30 @@
+version: 1
+clips:
+  af_heart/e5a5b7da32077.mp3:
+    scene: hallway
+    voice: af_heart
+    seconds: 2.8
+  af_heart/500ec746a79e6.mp3:
+    scene: cellar-door
+    voice: af_heart
+    seconds: 2.9
+  af_heart/1d08100b2d3107.mp3:
+    scene: cellar-door
+    voice: af_heart
+    seconds: 4.8
+  af_heart/15bc91486ce71a.mp3:
+    scene: cellar-door
+    voice: af_heart
+    seconds: 4.6
+  af_heart/134cb5c53e8b44.mp3:
+    scene: footsteps-above
+    voice: af_heart
+    seconds: 3.8
+  af_heart/1cf1cd6ff7c2e7.mp3:
+    scene: doors-seal
+    voice: af_heart
+    seconds: 2.1
+  af_heart/515a387e5f6d7.mp3:
+    scene: escape
+    voice: af_heart
+    seconds: 3.7
