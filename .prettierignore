@@ -2,3 +2,4 @@ docs/
 .claude/
 tests/fixtures/saves/
 app/desktop/src-tauri/patches/
+THIRD_PARTY_NOTICES.md

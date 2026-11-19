@@ -34,7 +34,7 @@ The desktop app needs Rust and the [Tauri prerequisites](https://tauri.app/start
 - **Linux** (Debian or Ubuntu): `sudo apt install libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev`, the list CI installs.
 - **Windows:** the Microsoft C++ Build Tools (MSVC) and WebView2, which Windows 10 and 11 usually already have.
 
-`npm run desktop:build` makes an installable app for the OS you run it on. [docs/release.md](docs/release.md) says what it holds.
+`npm run desktop:build` makes an installable app for the OS you run it on. Tagged versions are built for macOS, Windows and Linux on GitHub and attached to the repository's releases; [docs/release.md](docs/release.md) says what a build holds and how a release is made.
 
 Two original adventures come with the game, built on the free SRD 5.2 rules:
 
