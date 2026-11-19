@@ -249,7 +249,8 @@ async function pluginFiles(): Promise<Record<string, string>> {
   ]) {
     for (const name of await readdir(root, { recursive: true })) {
       const file = `${root}/${name.replaceAll("\\", "/")}`;
-      if (name.endsWith(".yaml")) files[file] = await readFile(file, "utf8");
+      if (/\.(yaml|json)$/.test(name))
+        files[file] = await readFile(file, "utf8");
       // The adventure's pictures: only that they're there is checked.
       else if (/\.\w+$/.test(name)) files[file] = "";
     }
