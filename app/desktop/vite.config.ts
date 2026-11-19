@@ -37,6 +37,8 @@ export default defineConfig({
   build: {
     outDir: resolve(repoRoot, "out/desktop"),
     emptyOutDir: true,
+    // The CSP allows no data: URLs, so a small sound, font or picture is a file like any other.
+    assetsInlineLimit: 0,
   },
   server: {
     host: "127.0.0.1",
