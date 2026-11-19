@@ -10,7 +10,7 @@ import { drawDecision } from "./game-options.ts";
 import { drawJournal } from "./game-journal.ts";
 import { drawSheets } from "./game-sheet.ts";
 import { button, el, enter, picture, replaceKeepingOpen } from "./dom.ts";
-import { keyshortcuts, MOD } from "./keys.ts";
+import { keyshortcuts, letterOf, MOD } from "./keys.ts";
 import { renderCombat } from "./sheet-view.ts";
 
 // A side drawer: the character sheet or the journal, opened from the top bar so the stage stays clear.
@@ -158,7 +158,6 @@ export function showGame(ctx: ShellContext): void {
   };
   const hud = button("", openSheet);
   hud.className = "hud";
-  hud.setAttribute("aria-label", "Open the character sheet");
   hud.setAttribute("aria-keyshortcuts", keyshortcuts("I"));
   hud.title = `Character (${MOD}I)`;
   const journal = button("Journal", openJournal);
@@ -355,7 +354,7 @@ export function showGame(ctx: ShellContext): void {
   ctx.keys = {
     owner: stage,
     handle: (event) => {
-      const run = shortcuts[event.key.toLowerCase()];
+      const run = shortcuts[letterOf(event)];
       if (
         !run ||
         !(event.metaKey || event.ctrlKey) ||
@@ -432,7 +431,8 @@ export function showGame(ctx: ShellContext): void {
       plate.show(ctx.game, {
         kind: "foe",
         kicker: foes.length === 1 ? "A foe appears" : "Foes appear",
-        title: new Intl.ListFormat(undefined, { type: "conjunction" }).format(
+        // The game's words are English, so "and" is too, whatever the OS's language.
+        title: new Intl.ListFormat("en", { type: "conjunction" }).format(
           foes.map((foe) => foe.name),
         ),
         pictures: foes

@@ -137,40 +137,47 @@ export async function showLibrary(
   const broken = opened.filter((book) => "broken" in book);
   const heading = el("h2", { text: "Book library" });
   heading.tabIndex = -1;
-  ctx.screen.replaceChildren(
+  const screen = el(
+    "section",
+    { class: "menu" },
+    heading,
     el(
-      "section",
-      { class: "menu" },
-      heading,
-      el(
-        "div",
-        { class: "options" },
-        ...opened.flatMap((book) =>
-          "broken" in book
-            ? []
-            : [
-                button(book.title, () => {
-                  ctx.act(() => ctx.showBook(books, book.id), {
-                    busy: OPENING,
-                  });
-                }),
-              ],
-        ),
+      "div",
+      { class: "options" },
+      ...opened.flatMap((book) =>
+        "broken" in book
+          ? []
+          : [
+              button(book.title, () => {
+                ctx.act(() => ctx.showBook(books, book.id), {
+                  busy: OPENING,
+                });
+              }),
+            ],
       ),
-      // A book that won't open is named, so it isn't missing without a word.
-      ...(broken.length > 0
-        ? [
-            el("p", {
-              class: "empty",
-              text: `${broken.map((book) => book.title).join(", ")} couldn't be opened. Its files may be damaged; install it again to fix it.`,
-            }),
-          ]
-        : []),
-      ...(opened.length === 0
-        ? [el("p", { class: "empty", text: "There are no books here yet." })]
-        : []),
     ),
+    // A book that won't open is named, so it isn't missing without a word.
+    ...(broken.length > 0
+      ? [
+          el("p", {
+            class: "empty",
+            text: `${broken.map((book) => book.title).join(", ")} couldn't be opened. Its files may be damaged; install it again to fix it.`,
+          }),
+        ]
+      : []),
+    ...(opened.length === 0
+      ? [el("p", { class: "empty", text: "There are no books here yet." })]
+      : []),
   );
+  ctx.screen.replaceChildren(screen);
+  ctx.keys = {
+    owner: screen,
+    handle: (event) => {
+      if (event.key !== "Escape") return false;
+      ctx.act(ctx.showMenu);
+      return true;
+    },
+  };
   ctx.focusNext = heading;
 }
 
@@ -260,20 +267,29 @@ export async function showBook(
   };
   search.addEventListener("input", drawContents);
   drawContents();
-  ctx.screen.replaceChildren(
+  const screen = el(
+    "section",
+    { class: "book" },
+    heading,
+    search,
     el(
-      "section",
-      { class: "book" },
-      heading,
-      search,
-      el(
-        "div",
-        { class: "book-layout" },
-        contents,
-        el("div", {}, kindsBox, text, rulings),
-      ),
+      "div",
+      { class: "book-layout" },
+      contents,
+      el("div", {}, kindsBox, text, rulings),
     ),
   );
+  ctx.screen.replaceChildren(screen);
+  // Esc goes back as the first button does: to the game it was opened from, else the library.
+  ctx.keys = {
+    owner: screen,
+    handle: (event) => {
+      if (event.key !== "Escape") return false;
+      if (at) at.back();
+      else ctx.act(() => ctx.showLibrary(books));
+      return true;
+    },
+  };
   ctx.focusNext = heading;
   if (at) await openSection(at.file);
 }

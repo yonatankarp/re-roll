@@ -1,7 +1,9 @@
+import { own } from "../kernel/own.ts";
 import { z } from "zod";
 import { type Issue, zodIssues } from "../kernel/issues.ts";
 import { ContentIdSchema, type GameSystem } from "../kernel/system.ts";
 import { AMBIENCES } from "./ambience.ts";
+import { DEFAULT_COMPANIONS, DEFAULT_PARTY_SIZE } from "./companions.ts";
 
 const SlugSchema = z
   .string()
@@ -79,7 +81,8 @@ export const StoryEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("advanceClock"),
     clock: SlugSchema,
-    by: z.number().int().default(1),
+    // A clock only runs forward, so it never drops below 0 and no threshold fires twice.
+    by: z.number().int().min(1).default(1),
   }),
   z.strictObject({
     kind: z.literal("adjustAttitude"),
@@ -100,13 +103,21 @@ export const StoryEffectSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+// A choice's own id, so a save waiting inside it still finds it after choices are added or moved.
+// Without one, its index stands in, so an id can't be a number.
+const ChoiceIdSchema = SlugSchema.refine((id) => !/^\d+$/.test(id), {
+  message: "must not be a number, which would read as a choice's place",
+});
+
 const DirectChoiceSchema = z.strictObject({
+  id: ChoiceIdSchema.optional(),
   label: z.string().min(1),
   when: ConditionSchema.optional(),
   effects: z.array(StoryEffectSchema).min(1),
 });
 
 const CheckChoiceSchema = z.strictObject({
+  id: ChoiceIdSchema.optional(),
   label: z.string().min(1),
   when: ConditionSchema.optional(),
   check: z.unknown(),
@@ -204,6 +215,26 @@ const AdventureInfoSchema = z.strictObject({
   startScene: SlugSchema,
   setting: SlugSchema.optional(), // the world it's set in, such as "ravenloft", for content that needs one
   resources: z.record(SlugSchema, z.number().int().min(0)).optional(),
+  // Unset, the party is four: the player and three of the engine's companions (story/companions.ts).
+  party: z
+    .strictObject({
+      size: z.number().int().min(1).max(8).optional(),
+      companions: z
+        .array(
+          z.strictObject({
+            name: z.string().min(1),
+            pronouns: z.string().min(1),
+          }),
+        )
+        .min(1)
+        .optional(),
+    })
+    .refine(
+      ({ size = DEFAULT_PARTY_SIZE, companions = DEFAULT_COMPANIONS }) =>
+        companions.length >= size - 1,
+      { message: "names fewer companions than the party needs" },
+    )
+    .optional(),
 });
 
 export type StoryEffect = z.infer<typeof StoryEffectSchema>;
@@ -220,6 +251,7 @@ export interface Adventure {
   readonly startScene: string;
   readonly setting?: string | undefined;
   readonly resources?: Readonly<Record<string, number>> | undefined;
+  readonly party?: z.infer<typeof AdventureInfoSchema>["party"];
   readonly scenes: readonly z.infer<typeof SceneSchema>[];
   readonly npcs: readonly z.infer<typeof NpcSchema>[];
   readonly factions: readonly z.infer<typeof FactionSchema>[];
@@ -396,7 +428,7 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
           need(file, secretIds, effect.secret, "secret");
           break;
         case "system": {
-          const definition = system.storyEffects[effect.effect];
+          const definition = own(system.storyEffects, effect.effect);
           if (!definition) {
             report(
               file,
@@ -455,7 +487,7 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
           need(file, npcIds, leaf.npc, "NPC");
           break;
         case "system": {
-          const schema = system.storyPredicates[leaf.predicate]?.schema;
+          const schema = own(system.storyPredicates, leaf.predicate)?.schema;
           if (!schema) {
             report(
               file,
@@ -489,7 +521,7 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
     const { keys, groups = {} } = system.outcomes;
     const covered = new Map<string, number>();
     for (const name of Object.keys(results)) {
-      const members = keys.includes(name) ? [name] : groups[name];
+      const members = keys.includes(name) ? [name] : own(groups, name);
       if (!members) {
         report("scenes", `scene "${sceneId}": undeclared outcome "${name}"`);
         continue;
@@ -557,7 +589,16 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
     }
     for (const { when } of scene.textVariants) checkCondition("scenes", when);
     const targets: string[] = [];
+    const choiceIds = new Set<string>();
     for (const choice of scene.choices) {
+      if (choice.id !== undefined) {
+        if (choiceIds.has(choice.id))
+          report(
+            "scenes",
+            `scene "${scene.id}": duplicate choice id "${choice.id}"`,
+          );
+        choiceIds.add(choice.id);
+      }
       checkCondition("scenes", choice.when);
       if ("effects" in choice) {
         checkEffects("scenes", choice.effects);

@@ -17,12 +17,15 @@ export function adventureCard(
 ): HTMLElement {
   const open = button("", start);
   open.className = "cover-open";
+  // The cover's own lettering repeats the title under it, so only the title and levels name the button.
+  const plate = el("span", { class: "cover-plate", text: adventure.title });
+  plate.setAttribute("aria-hidden", "true");
   open.append(
     el(
       "span",
       { class: "cover-art" },
-      el("span", { class: "cover-plate", text: adventure.title }),
-      // The button's label names the adventure, so the picture needs no words of its own.
+      plate,
+      // The title under it names the adventure, so the picture needs no words of its own.
       ...(adventure.cover
         ? [picture(game, adventure.cover, "", "cover-image")]
         : []),
@@ -31,12 +34,6 @@ export function adventureCard(
     ...(adventure.levels
       ? [el("span", { class: "meta", text: `Levels ${adventure.levels}` })]
       : []),
-  );
-  open.setAttribute(
-    "aria-label",
-    adventure.levels
-      ? `${adventure.title}, levels ${adventure.levels}`
-      : adventure.title,
   );
   const node = el("div", { class: "cover-card" }, open);
   if (resume) {

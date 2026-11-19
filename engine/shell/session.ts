@@ -353,7 +353,7 @@ function agoText(savedAt: string, now: number): string | null {
   const seconds = Math.max(0, (now - Date.parse(savedAt)) / 1000);
   if (Number.isNaN(seconds) || seconds >= 7 * 86400) return null;
   if (seconds < 60) return "just now";
-  const format = new Intl.RelativeTimeFormat(undefined, { style: "short" });
+  const format = new Intl.RelativeTimeFormat("en", { style: "short" }); // English, as "just now" is
   if (seconds < 3600) return format.format(-Math.floor(seconds / 60), "minute");
   if (seconds < 86400)
     return format.format(-Math.floor(seconds / 3600), "hour");
@@ -993,7 +993,7 @@ export function createGame({
         }
         const savedAt = await savedAtOf(path);
         const when = savedAt
-          ? new Date(savedAt).toLocaleString(undefined, {
+          ? new Date(savedAt).toLocaleString("en", {
               dateStyle: "medium",
               timeStyle: "short",
             })
