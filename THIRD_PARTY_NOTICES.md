@@ -123,7 +123,7 @@ The production dependencies in `package-lock.json`, and the Tauri packages the U
 | sharp | 0.35.5 | Apache-2.0 | https://github.com/lovell/sharp |
 | sprintf-js | 1.1.3 | BSD-3-Clause | https://github.com/alexei/sprintf.js |
 | tar | 7.5.23 | BlueOak-1.0.0 | https://github.com/isaacs/node-tar |
-| three | 0.186.1 | MIT | https://github.com/mrdoob/three.js |
+| three | 0.187.0 | MIT | https://github.com/mrdoob/three.js |
 | type-fest | 0.13.1 | (MIT OR CC0-1.0) | https://github.com/sindresorhus/type-fest |
 | undici-types | 8.9.0 | MIT | https://github.com/nodejs/undici |
 | yallist | 5.0.0 | BlueOak-1.0.0 | https://github.com/isaacs/yallist |
@@ -2941,7 +2941,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-Used by: three 0.186.1
+Used by: three 0.187.0
 
 ```text
 The MIT License

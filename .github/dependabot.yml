@@ -9,6 +9,13 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+    ignore:
+      # typescript-eslint supports TypeScript below 6.1 only; lift once it supports 7.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # Must match the copy kokoro-js bundles, or the hub settings we apply never reach the model.
+      - dependency-name: "@huggingface/transformers"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: cargo
     directory: /app/desktop/src-tauri
     schedule:
