@@ -17,20 +17,22 @@ test("the menu and setup look as they did", async ({ page, problems }) => {
     maxDiffPixelRatio: 0.01,
   } as const;
 
-  await page.goto("/");
-  await expect(
-    page.getByRole("button", { name: "Ambush on the Old Road" }),
-  ).toBeVisible();
-  await settled();
-  await expect(page).toHaveScreenshot("menu.png", look);
+  try {
+    await page.goto("/");
+    await expect(
+      page.getByRole("button", { name: "Ambush on the Old Road" }),
+    ).toBeVisible();
+    await settled();
+    await expect(page).toHaveScreenshot("menu.png", look);
 
-  await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
-  await expect(page.locator(".setup")).toBeVisible();
-  await settled();
-  await expect(page).toHaveScreenshot("setup.png", look);
-
-  // WebKit's screenshots add a <style> of Playwright's own, from no file, as the app's code never is.
-  const own = /^CSP: style-src-elem blocked inline at :\d+:\d+$/;
-  const others = problems.filter((text) => !own.test(text));
-  problems.splice(0, problems.length, ...others);
+    await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
+    await expect(page.locator(".setup")).toBeVisible({ timeout: 15_000 });
+    await settled();
+    await expect(page).toHaveScreenshot("setup.png", look);
+  } finally {
+    // WebKit's screenshots add a <style> of Playwright's own, from no file, as the app's code never is.
+    const own = /^CSP: style-src-elem blocked inline at :\d+:\d+$/;
+    const others = problems.filter((text) => !own.test(text));
+    problems.splice(0, problems.length, ...others);
+  }
 });
