@@ -1,3 +1,4 @@
+import { own } from "../kernel/own.ts";
 import { parse } from "yaml";
 import {
   type Adventure,
@@ -222,11 +223,13 @@ function resolveOrder(
     }
     const record = catalog.plugins.get(id);
     if (!record) {
-      issues.push({
-        plugin: from,
-        file: null,
-        message: `missing plugin "${id}"`,
-      });
+      // A plugin whose manifest didn't load is there, so its own problems say why, not "missing".
+      const scanned = catalog.issues.filter((issue) => issue.plugin === id);
+      issues.push(
+        ...(scanned.length > 0
+          ? scanned
+          : [{ plugin: from, file: null, message: `missing plugin "${id}"` }]),
+      );
       return;
     }
     state.set(id, "visiting");
@@ -493,12 +496,15 @@ export async function loadRun(
     extensionOf(file) === YAML &&
     !file.startsWith(`${NARRATION_FOLDER}/`) &&
     !Object.hasOwn(WORLD_KINDS, file.split("/")[0] ?? "") &&
-    !system?.contentKinds[file.split("/")[0] ?? ""]?.lore;
+    !own(system?.contentKinds, file.split("/")[0] ?? "")?.lore;
 
   for (const record of order) {
     const plugin = record.manifest.id;
     // A plugin's files are read all at once and then used in order, so issues keep their order.
-    for (const file of record.files.filter(hashed)) {
+    // Lore isn't hashed but is read all the same, so it is fetched with the rest rather than one file at a time.
+    const read = (file: string): boolean =>
+      extensionOf(file) === YAML && !file.startsWith(`${NARRATION_FOLDER}/`);
+    for (const file of record.files.filter(read)) {
       const text = storage.read(`${record.root}/${file}`);
       text.catch(() => undefined); // a failed read is reported where the file is used
       texts.set(`${record.root}/${file}`, text);
@@ -543,7 +549,9 @@ export async function loadRun(
       const world = Object.hasOwn(WORLD_KINDS, folder)
         ? WORLD_KINDS[folder]
         : undefined;
-      const kind = isWorld ? world : (system?.contentKinds[folder] ?? world);
+      const kind = isWorld
+        ? world
+        : (own(system?.contentKinds, folder) ?? world);
       if (!kind) {
         const message = isWorld
           ? `content folder "${folder}" isn't a world kind, which is all a world plugin holds`
@@ -594,13 +602,27 @@ export async function loadRun(
     closures.get(owner)?.has(ownerOf(id)) ?? false;
 
   // A twin shares one encoding: a book's copy of an SRD entry keeps its own name, text and lists and plays as the SRD's.
-  for (const { item, kind, plugin, file, index } of deferred) {
+  // A twin may play as another twin, so each pass takes those whose target is in, until a pass takes none; file
+  // order then never decides whether a chain loads.
+  let waiting = deferred;
+  for (let taken = true; taken;) {
+    taken = false;
+    const later: Deferred[] = [];
+    for (const each of waiting) {
+      if (entries.has(String(each.item.playsAs))) {
+        playAs(each);
+        taken = true;
+      } else later.push(each);
+    }
+    waiting = later;
+  }
+  for (const each of waiting) playAs(each); // unknown, or a cycle
+  function playAs({ item, kind, plugin, file, index }: Deferred): void {
     const target = String(item.playsAs);
     const twin = entries.get(target);
     const report = (message: string): void => {
       issues.push({ plugin, file, message: `${String(item.id)}: ${message}` });
     };
-    // A twin that plays as another is still deferred here, so chains are reported as unknown.
     if (!twin) report(`plays as unknown entry "${target}"`);
     else if (!canSee(plugin, target))
       report(`plays as "${target}" without requiring its plugin`);

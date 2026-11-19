@@ -1,3 +1,4 @@
+import { own } from "../kernel/own.ts";
 import { z } from "zod";
 import type { Dice } from "../kernel/dice.ts";
 import type {
@@ -40,7 +41,7 @@ export interface StoryResult {
 }
 
 export const STORY_FRAME_PREFIX = "story:";
-// Rest options sit beside a scene's choices, whose ids are their indexes.
+// Rest options sit beside a scene's choices, whose ids are their own or else their indexes.
 export const REST_OPTION_PREFIX = "rest:";
 export const SCENE_DECISION_PREFIX = "scene:"; // a scene's choices
 
@@ -54,6 +55,15 @@ const AfterEncounterSchema = z.object({
   encounter: z.string(),
   effects: z.array(StoryEffectSchema),
 });
+
+// Each story frame's payload, so a save is checked at load rather than failing on the player's next answer.
+export const STORY_FRAME_SCHEMAS: Readonly<Record<string, z.ZodType>> = {
+  "story:resolveChoice": ResolveChoiceSchema,
+  "story:applyEffects": ApplyEffectsSchema,
+  "story:afterEncounter": AfterEncounterSchema,
+  "story:enterScene": EnterSceneSchema,
+  "story:director": z.object({}),
+};
 
 // Each system may only emit the shared narrative events and events under its own name.
 export function assertOwnEvents(
@@ -128,17 +138,17 @@ function evaluateLeaf(
   const { story } = state;
   switch (leaf.kind) {
     case "flag":
-      return (story.flags[leaf.flag] ?? false) === leaf.is;
+      return (own(story.flags, leaf.flag) ?? false) === leaf.is;
     case "clock":
-      return inBounds(story.clocks[leaf.clock] ?? 0, leaf);
+      return inBounds(own(story.clocks, leaf.clock) ?? 0, leaf);
     case "resource":
-      return inBounds(story.resources?.[leaf.resource] ?? 0, leaf);
+      return inBounds(own(story.resources, leaf.resource) ?? 0, leaf);
     case "visited":
-      return (story.visits?.[leaf.scene] ?? 0) >= leaf.atLeast;
+      return (own(story.visits, leaf.scene) ?? 0) >= leaf.atLeast;
     case "attitude":
-      return inBounds(story.attitudes[leaf.npc] ?? 0, leaf);
+      return inBounds(own(story.attitudes, leaf.npc) ?? 0, leaf);
     case "system": {
-      const predicate = run.system.storyPredicates[leaf.predicate];
+      const predicate = own(run.system.storyPredicates, leaf.predicate);
       if (!predicate) throw new Error(`Unknown predicate ${leaf.predicate}`);
       return predicate.evaluate(leaf.args, state.system, run);
     }
@@ -182,7 +192,7 @@ export function sceneText(
 // The current visit to the current scene, as "scene#visit".
 export function sceneVisit(story: StoryState): string {
   const scene = story.scene ?? "";
-  return `${scene}#${String(story.visits?.[scene] ?? 0)}`;
+  return `${scene}#${String(own(story.visits, scene) ?? 0)}`;
 }
 
 // One rest per visit to a scene, so resting again and again can't pass time for free.
@@ -244,7 +254,7 @@ export function storyDecision(
 
   const options = scene.choices.flatMap((choice, index) =>
     evaluateCondition(choice.when, run, state)
-      ? [{ id: String(index), label: choice.label }]
+      ? [{ id: choice.id ?? String(index), label: choice.label }]
       : [],
   );
   if (options.length === 0) return { kind: "ended", reason: "deadEnd" };
@@ -276,11 +286,11 @@ function resolveResults(
   results: Readonly<Record<string, readonly StoryEffect[]>>,
   outcome: string,
 ): readonly StoryEffect[] {
-  const direct = results[outcome];
+  const direct = own(results, outcome);
   if (direct) return direct;
   const { groups = {} } = run.system.outcomes;
   for (const [group, members] of Object.entries(groups)) {
-    const effects = results[group];
+    const effects = own(results, group);
     if (effects && members.includes(outcome)) return effects;
   }
   throw new Error(`No result covers the outcome "${outcome}"`);
@@ -306,7 +316,8 @@ function runResolveChoice(
       ],
     };
   }
-  // Choices' ids are their indexes, so an action's id never names one. The scene's choices come back after it.
+  // Choices' ids are slugs or indexes, never with a colon, so an action's id never names one. The scene's
+  // choices come back after it.
   const action = sceneActionsHere(run, state).find(
     (item) => item.id === payload.answer,
   );
@@ -319,7 +330,12 @@ function runResolveChoice(
       ],
     };
   }
-  const choice = scene.choices[Number(payload.answer)];
+  // By id first; an index is how choices without one are answered, and how saves from before ids name them.
+  const choice =
+    scene.choices.find((item) => item.id === payload.answer) ??
+    (/^\d+$/.test(payload.answer)
+      ? scene.choices[Number(payload.answer)]
+      : undefined);
   if (!choice) throw new Error(`Unknown choice ${payload.answer}`);
   if ("effects" in choice) return { frames: [effectsFrame(choice.effects)] };
 
@@ -379,7 +395,7 @@ function runApplyEffects(
         .flatMap((faction) => faction.clocks)
         .find((item) => item.id === effect.clock);
       if (!clock) throw new Error(`Unknown clock ${effect.clock}`);
-      const before = state.story.clocks[clock.id] ?? 0;
+      const before = own(state.story.clocks, clock.id) ?? 0;
       const after = Math.min(before + effect.by, clock.max);
       const crossed = clock.at
         .filter(({ value }) => before < value && value <= after)
@@ -398,7 +414,7 @@ function runApplyEffects(
           {
             kind: "attitudeAdjusted",
             npc: effect.npc,
-            value: (state.story.attitudes[effect.npc] ?? 0) + effect.by,
+            value: (own(state.story.attitudes, effect.npc) ?? 0) + effect.by,
           },
         ],
         frames: remaining,
@@ -408,7 +424,7 @@ function runApplyEffects(
         (item) => item.id === effect.encounter,
       );
       if (!encounter) throw new Error(`Unknown encounter ${effect.encounter}`);
-      const outcomes = run.adventure.encounterOutcomes[encounter.id];
+      const outcomes = own(run.adventure.encounterOutcomes, encounter.id);
       const result = run.system.startEncounter(encounter, context, {
         canFlee: outcomes?.onFlee !== undefined,
         defeatContinues: outcomes?.onDefeat !== undefined,
@@ -438,7 +454,7 @@ function runApplyEffects(
             // A party can't owe, so an adventure checks the price with a condition first.
             value: Math.max(
               0,
-              (state.story.resources?.[effect.resource] ?? 0) + effect.by,
+              (own(state.story.resources, effect.resource) ?? 0) + effect.by,
             ),
           },
         ],
@@ -469,7 +485,7 @@ function runApplyEffects(
       };
     }
     case "system": {
-      const definition = run.system.storyEffects[effect.effect];
+      const definition = own(run.system.storyEffects, effect.effect);
       if (!definition) throw new Error(`Unknown effect ${effect.effect}`);
       const result = definition.apply(effect.args, context);
       assertOwnEvents(run, result.events);
@@ -490,7 +506,7 @@ function runAfterEncounter(
   state: GameState,
   { encounter, effects }: z.infer<typeof AfterEncounterSchema>,
 ): StoryResult {
-  const outcomes = run.adventure.encounterOutcomes[encounter];
+  const outcomes = own(run.adventure.encounterOutcomes, encounter);
   switch (state.story.encounterOutcome) {
     case "defeat":
       return { frames: [effectsFrame(outcomes?.onDefeat ?? [])] };

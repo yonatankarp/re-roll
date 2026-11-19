@@ -124,7 +124,10 @@ export async function createNodeStorage(
       } catch (error) {
         if (!isMissing(error)) throw error;
       }
-      return found.sort((a, b) => a.path.localeCompare(b.path));
+      // Code-point order, the same in every locale, so what loads first never depends on the machine.
+      return found.sort((a, b) =>
+        a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+      );
     },
   };
 }

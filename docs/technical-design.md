@@ -5,7 +5,7 @@
 
 ## 1. Goal and assumptions
 
-Re-roll is a single-player game where you join a generated party and play a published-style adventure. A local model prepares each session in the background from what actually happened in earlier sessions. Play itself needs no model.
+Re-roll is a single-player game where you join a generated party and play a published-style adventure. Play needs no model; a local model only helps the book importer draft mechanics.
 
 The engine contains no game rules and no adventure content. **Everything specific to a game lives in a plugin.**
 
@@ -22,7 +22,7 @@ The engine contains no game rules and no adventure content. **Everything specifi
 
 **Assumptions to confirm**
 - **Platform:** TypeScript, with illustrated scenes and grid combat for D&D. Free roaming would add map-position state and change the UI, but the rest of the design would stand.
-- **Target machine:** the prep model must fit in 16 GB of memory, even though this development machine has 32 GB.
+- **Target machine:** the importer's local model must fit in 16 GB of memory, even though this development machine has 32 GB.
 
 ## 2. TypeScript best-practice findings
 
@@ -67,7 +67,7 @@ engine/                    Knows no game rules and no adventure
   kernel/                  IDs, Storage interface, system and plugin types, dice, events. Imports nothing else in engine/
   story/                   Scenes, clocks, secrets, variants, director, companions, ambience ids, narration clip names
   run/                     Plugin loader, registry, turn loop and saves, which tie kernel and story together
-  prep/                    Session prep logic and the ModelClient interface
+  prep/                    The ModelClient interface and runJob, which the book importer drafts with
   sdk/                     The only part of the engine plugins may import
   shell/                   App UI. Knows no rule system:
     session.ts             The game layer: views, saves, autosave, undo (also used headless)
@@ -148,7 +148,7 @@ All four extend `tsconfig.base.json`, which sets `strict` and `rootDir`, and eac
 
 ### File and network access
 
-Only `engine/platform` touches files or the network. The plugin loader, prep and saves depend on two small interfaces, so the same logic runs from a Node command during development and inside the Tauri app. `Storage` lives in `engine/kernel` because the loader needs it, and `ModelClient` lives in `engine/prep`:
+Only `engine/platform` touches files or the network. The plugin loader, the importer's model jobs and saves depend on two small interfaces, so the same logic runs from a Node command during development and inside the Tauri app. `Storage` lives in `engine/kernel` because the loader needs it, and `ModelClient` lives in `engine/prep`:
 
 ```ts
 export interface Storage {
@@ -179,7 +179,7 @@ The project's style is domain-driven design, applied to the code as it stands an
 | Rules system | `plugins/systems/dnd5.5e` (`core/`, `ui/`), the rules data plugins such as `plugins/rules/srd52` | The D&D 5.5e rules: content kinds and their schemas, characters, monsters, fights, checks, rests, gear, tactics, and the system's frames and events. `ui/` draws its sheet and board | `#sdk` and its own folder. `ui/` may also use `core/` and the DOM |
 | Adventures and scenes | `engine/story`, the adventure plugins such as `plugins/adventures/goblin-ambush` | Scenes, choices, flags, clocks, attitudes, resources, secrets, beats, variants, NPC profiles, companions, narration clip names and ambience ids | Engine core. Adventure plugins are data: they name a system (`system: dnd5.5e@^1`) and the rules plugins they need, and give the system's content by id |
 | Run and saves | `engine/run` | Loading plugins into a registry, the turn loop that folds events into game state, saves, replay and migrations | Engine core, Adventures and scenes |
-| Session prep | `engine/prep` | Background prep jobs and the `ModelClient` seam. It never changes game state | Adventures and scenes |
+| Model jobs | `engine/prep` | The `ModelClient` seam and `runJob`, for the book importer. It never changes game state | Adventures and scenes |
 | UI shell | `engine/shell`, `app/desktop` | Screens, menus, drawers, the option list, saves on disk, autosave, undo, narration and sound. It knows no rule system: a system draws its own parts through `system-ui.ts` | Engine core, Adventures and scenes, Run and saves. Never a system plugin |
 | Tools | `engine/tools`, `app/cli`, `engine/platform/node` | check-pack, coverage, the importer's logic, the test bot and headless play | Everything in the engine, including `platform` and the shell's game layer (`session.ts`) for headless play |
 
@@ -217,7 +217,7 @@ All state is one `GameState`, changed only by folding events: `applyEvent` in `e
 | Encounter | `DndState.combat` | `combatStarted`, `combatEnded`, `turnAdvanced`, `summoned`, `initiativeSwapped`, `damageShareLowered`, `weaponThrown` and `itemPickedUp` (weapons lying on the field), and `damaged` (the rounds since anyone was hurt) |
 | Party between fights | `DndState`: `gold`, `shopBought`, `ambient`, `surprise`, `revealed`, `sinceLongRest` | `goldSpent`, `traded`, `environmentEntered`, `surpriseSet`, `squaresSeen`, `timePassed` |
 
-Frames on the `stack` are the steps a run is waiting on, such as `dnd5.5e:attackRoll` or `dnd5.5e:afterMove`. A frame handler reads state and returns events and frames. It never changes state itself. Narrative events (`checkResolved`, `actorDowned`, `encounterStarted` and the rest in `kernel/events.ts`) are how a system tells the story and prep what happened without their knowing the rules. Of them only `encounterEnded` changes story state, through its outcome.
+Frames on the `stack` are the steps a run is waiting on, such as `dnd5.5e:attackRoll` or `dnd5.5e:afterMove`. A frame handler reads state and returns events and frames. It never changes state itself. Narrative events (`checkResolved`, `actorDowned`, `encounterStarted` and the rest in `kernel/events.ts`) are how a system tells the story what happened without its knowing the rules. Of them only `encounterEnded` changes story state, through its outcome.
 
 Some events cross aggregates in one fold. `damaged` changes an actor and the fight's count of calm rounds, `weaponThrown` and `itemPickedUp` change an actor and the field, and `timePassed` ages every actor. That is accepted today. A new event changes one aggregate where it can.
 
@@ -330,7 +330,7 @@ export const dnd55e = defineSystem({
   applyEvent,           // the only place system state changes
   nextDecision,         // whose decision comes next, if anyone's, with read access to content
   decidePolicy,         // non-player decisions, without a model
-  // Still to come: describeFacts for prep, glossary, and importSchemas for the book importer.
+  // Still to come: glossary, and importSchemas for the book importer.
 });
 ```
 
@@ -423,7 +423,7 @@ Combat AI is plain code rather than a model, so play stays fast and works withou
 
 ### 6.4 Narrative events
 
-Every system must emit these events, so that prep, the director and companions can react without knowing the rules:
+Every system must emit these events, so that the director and companions can react without knowing the rules:
 
 | Event | Meaning |
 |---|---|
@@ -470,6 +470,8 @@ A scene's `check` and `results` are the only part tied to rules. The system's sc
           - { kind: goto, scene: ambush-surprised }
 ```
 
+A choice can carry an `id` (a slug that isn't a number), which is what the player's answer records. Without one its place in the list stands in, so a save waiting inside a choice finds a different one if choices are added or moved above it. An `advanceClock` only moves a clock forward (`by` of at least 1), so no threshold fires twice.
+
 Scene checks are made by the player's character, with the same roll as a check in a fight: Advantage limited to some skills, bonuses limited to a skill or ability, a d20 floor such as Reliable Talent's, a total floor such as Indomitable Might's, half proficiency, and a rescue that adds a die to a failed check. Effects end with a fight, so in a scene only passives and worn magic items' `passives` count. A scene never asks for a tool check yet.
 
 **Encounter outcomes.** An encounter can branch on how it ends, using three optional lists of story effects. These keys belong to the story, and the rest of the entry goes to the system's encounter schema:
@@ -498,7 +500,7 @@ An outcome with no `goto` leaves the party in the current scene. The engine tell
 
 **Companions** are split between the engine and the system, so any party works in any adventure:
 - **The system** builds the character through `createCharacter`.
-- **The engine** holds personality, goal, secret and loyalty. Loyalty thresholds trigger arguments, departures or betrayals, and prep writes their voices.
+- **The engine** holds each companion's name and pronouns. An adventure sets the party's size and who may join with `party: { size, companions }` in `adventure.yaml`; unset, the party is four, drawn from a table of six in `story/companions.ts`. Saves from before #220 also hold a personality, goal, secret and loyalty for each, written for session prep, which nothing reads.
 - **Adventures** only offer hooks, such as "a companion with a reason to hate goblins".
 
 **Adventure plugin layout**
@@ -1002,7 +1004,7 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 - **Levelling:** the story decides. `dnd5.5e:awardXp` adds XP, and `dnd5.5e:levelUp` is a milestone that awards whatever reaches the next level, so one number drives both. Hit points use the fixed value (half the die plus one), and a higher Constitution raises every earlier level too. Content can stop short of level 20, and characters then stay where they are.
 - **Rests:** `dnd5.5e:shortRest` lets the player spend Hit Dice one at a time, and `dnd5.5e:longRest` restores HP, Hit Dice and slots, clears temporary HP and removes one level of Exhaustion. Features recharge from their `resources` data, and Pact Magic slots return on a Short Rest.
 - **Rests, gear, shops and carrying** have their own sections: 7.1, 8.13 and 8.14.
-- **Companions** get their personality from `rollCompanions` and their character from the same steps the player answers, answered by policy with the world dice, so each run differs. They favor their class's abilities and spells that do something in play, avoid repeating a class, and level whenever the player does.
+- **Companions** get their names from `rollCompanions` and their character from the same steps the player answers, answered by policy with the world dice, so each run differs. They favor their class's abilities and spells that do something in play, avoid repeating a class, and level whenever the player does.
 
 **To finish this for an imported book,** parse it again with `npm run import -- parse`. That adds what older imports lack: each class's skill list (until then, any two skills), Martial weapon limits such as the Rogue's (`martialWeaponProperties`, until then all Martial weapons), and the new `subclasses` kind (until then the subclass choice is skipped).
 
@@ -1098,7 +1100,7 @@ export interface SaveFile {
 
 `engine/run/save.ts` holds the format, `SAVE_FORMAT_VERSION` (1), loading and replay. `engine/shell/session.ts` decides when to write and how saves are listed.
 
-- **Loading** checks the file with Zod, checks every system event against its schema, and rebuilds state by applying the recorded events, so it doesn't re-roll dice and is safe if content later changes. The shell then tells the log again (`retell`) to rebuild the story text, rolls and leads.
+- **Loading** checks the file with Zod, checks every system event against its schema, that the run starts once and first, and every step the save is waiting on (the engine's own `story:` steps too), and rebuilds state by applying the recorded events, so it doesn't re-roll dice and is safe if content later changes. Events that each look right but disagree, which the rules throw on, give a "damaged save" error instead. Keys from content and saves are looked up with `own` (`kernel/own.ts`), so an id such as `constructor` never finds something from `Object.prototype`. The shell then tells the log again (`retell`) to rebuild the story text, rolls and leads.
 - **Replay checking:** `replayInputs` runs the inputs again from the seed. The tests confirm that the same events and final state come out. This is the core determinism test.
 - **Refusals and warnings:** a different `formatVersion`, a different system or a missing plugin stops the load with a clear message rather than risking the save. A plugin whose hash has changed only warns. The hash covers the plugin's parsed YAML with keys sorted, so comments, key order and formatting don't change it. A save that still holds the older raw-text hash loads without a warning while the text is unchanged, and the next save stores the content hash.
 - **Migrations:** `migrations` in `save.ts` maps format n to a function that turns a save into format n + 1, and `migrate` runs them in turn before the schema sees the save. The table is empty while the format is 1. A save from a newer format, or one with no migration path, is refused (issue #35). Rule changes don't bump the version either: a save whose answers a newer build no longer offers still loads from its events, but `replayInputs` on it fails (section 8.16).
@@ -1113,23 +1115,9 @@ export interface SaveFile {
 - **Writes:** Node storage and the desktop app write a temporary file and rename it, so a crash can't destroy a save. IndexedDB and `localStorage` write one save at a time, which is atomic per save.
 - **Snapshots** wait until loading is actually slow.
 
-## 10. Session prep
+## 10. Model jobs
 
-Prep is a background job in the engine that never changes game state. The same logic runs from a Node command during development and from the Tauri app when packaged, through the interfaces in section 3. It reads the plugins and the save log, then writes an overlay:
-
-```text
-saves/<run>/prep/session-03.json
-```
-
-**Pipeline**
-1. **Digest:** narrative events and the system's `describeFacts` become plain facts: choices, deaths, attitudes, clocks.
-2. **Plan:** the director's logic finds nearby locations, active NPCs and likely beats. This is code, not the model.
-3. **Queue:** each item to write becomes a small job, such as one scene description, one conversation or one set of banter.
-4. **Write:** one model call per job, with only the facts that job needs and the system's `glossary`.
-5. **Check:** parse, verify references and check for spoilers. Retry on failure.
-6. **Save:** each finished job is saved immediately, so prep can stop and resume safely.
-
-**At play time:** the game uses overlay text when it's present and valid, and the base adventure text otherwise. It always works, even if prep never ran.
+Session prep, a background job that would have written each session's scenes and banter with a local model, was removed in #220: nothing played it, and it put companion fields and a world dice stream into every save. What it left is the `ModelClient` seam and `runJob` in `engine/prep`, which the book importer drafts mechanics with. Each request has a timeout (15 minutes by default, since generating on a laptop is slow), and a reply that isn't a chat completion fails with its own message, apart from a failed connection.
 
 **Model connection:** the `ModelClient` implementations use plain `fetch` to `llama-server`'s OpenAI-compatible endpoint, with no SDK.
 
@@ -1144,10 +1132,6 @@ saves/<run>/prep/session-03.json
 - **Failures are bounded:** after a set number of retries, that job falls back to base text and the failure is logged.
 
 This is why effects in section 8.7 have only one level of nesting. It also means the book importer can use the same constraint.
-
-### 10.2 Secrets
-
-Prep needs some secrets to write good foreshadowing, so a job's prompt only gets those the director has allowed for that job. Locked secrets can list spoiler terms that cause a rejection if they appear in the output. This catches direct leaks but not paraphrases, so some spoilers could slip through.
 
 ## 11. Book importer
 
@@ -1195,7 +1179,6 @@ An independent audit checked 145 encoded spells and 120 monsters against their o
 | Headless play | The game layer the UI uses offers every choice a decision has, and only those, through whole adventures |
 | Second adventure | The engine is adventure-agnostic: it must work with no engine change |
 | **Fixture system** | The engine is system-agnostic: a tiny test-only rule system runs a story with no engine change |
-| Prep evaluation | You read generated overlays and judge them, as automated checks can't measure writing quality |
 
 **The fixture system** lives in `tests/fixtures/system-d6`. It rolls one d6 with three outcome keys and has no turn order, HP or grid. It isn't a copy of any published game. Because it's so unlike D&D, any D&D assumption that creeps into the engine breaks a test straight away, rather than being discovered when Daggerheart is built.
 
@@ -1242,11 +1225,11 @@ Without an adventure it lists them. Saves go under `<dir>/saves`, which defaults
 
 1. **Foundations (done):** tooling, the SDK, the plugin loader and `check-pack`, with the fixture system and two tiny original adventures kept in `tests/fixtures`.
 2. **Prep test (three runs done, awaiting your read):** generate an overlay from a sample log using a model that fits in 16 GB. Judge quality and speed. **If this fails, the design needs rethinking, so it comes early.** See section 16.
-3. **Engine kernel and story runtime (done):** turn loop, seeded dice, replay test and test bot, all running against the fixture system. Not included yet: companion loyalty triggers, levels and items, prep digests built from the log, and a smarter director.
+3. **Engine kernel and story runtime (done):** turn loop, seeded dice, replay test and test bot, all running against the fixture system. Not included yet: levels and items, and a smarter director.
 4. **D&D plugin core (first slice done):** derived stats, damage pipeline and frames, with both adventures copied to `plugins/adventures` in D&D form and playable from the command line. See section 8.12.
 5. **Levels 1–5 content (importer started):** all classes and the monsters they meet. The importer's spell path is built and tested on SRD text, and other kinds of content come next.
 6. **UI (first slice done):** the engine shell, in a browser and in Tauri, with the sheet and combat data from `plugins/systems/dnd5.5e/ui`, and the D&D combat board: tokens on a 5-foot grid over the scene's picture, animated dice, hits, damage and movement, and clicking a token or square to act. It previews the route to a square and whether it gives an Opportunity Attack, shades an enemy's reach, and outlines an area spell's squares, and a cursor moved with the arrow keys does everything a click does. A game starts with the system's settings, which D&D uses for difficulty: Story cuts the damage the party takes to a third, Normal is the book as written, and Hard adds half again. A fight far beyond the party is softened at each difficulty: as it starts, `damageToPartyFor` (`worth.ts`) weighs the rounds the party needs to win against the rounds the foes need to drop it (a legend's round counts its legendary actions), and where that pressure passes the difficulty's `MOST_PRESSURE`, the party takes less damage, just enough to bring it down to that. The share is kept in the `combatStarted` event, so it doesn't change on load. On a battle map with fog, it's weighed on the foes the party sees, and weighed again when it first sees another (`damageShareLowered`), kept only if lower. Monsters keep the books' numbers. The choice is recorded in the run's start input, so saves and replays keep it. An encounter can name a battle map from its book (`battlemap` in `EncounterSchema`): the picture, the crop that holds the fight on the printed grid, its columns and rows, one string per row marking walls with `#`, and where each side starts. Walls block movement, and the picture sits under the grid. Tokens show a picture from the image index, cropped to the `face` marked there, found by a monster's name or a character's species and class (`subjects`).
-7. **Full loop:** play, prep, play. Then package the app with `llama-server` as a Tauri sidecar.
+7. **Full loop:** dropped with session prep (#220).
 8. **Your books:** import, review and expand automation over time.
 
 Daggerheart would come after this as a new plugin in `plugins/systems/daggerheart`, with its own rules data and adventures.
@@ -1272,10 +1255,11 @@ Daggerheart would come after this as a new plugin in `plugins/systems/daggerhear
 | Encoding content is larger than estimated | Delays full-book support | `automation` levels let content work partly from the start |
 | Effect vocabulary can't express enough | More `partial` content | Grow it from real content, and track coverage in `check-pack` |
 | Wrong mechanics pass the importer's checks | Bad rules in the game | Claude encodes instead of the local model, code checks every encoding, and uncertain spells stay text only |
-| Prep doesn't anticipate what you do | Falls back to plainer base text | Prepare situations rather than plots, and add a short prep at natural breaks |
 | `typescript-eslint` falls behind TypeScript | Stuck on 6.0 for longer | No real harm: 6.0 is enough for this project |
 
 ## 16. Prep test results
+
+Kept as a record: session prep itself was removed in #220.
 
 **First run, 5 November 2026:** Gemma 4 12B Q4_0 (7.2 GB, Apache 2.0) on `llama-server` 0.8.0, with four hand-written session histories and four jobs each. These are development numbers from a 32 GB M2 Max with other apps competing for the GPU.
 

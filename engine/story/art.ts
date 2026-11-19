@@ -42,6 +42,6 @@ export type Credit = z.infer<typeof CreditsSchema>[number];
 
 export function creditLine(credit: Credit): string {
   const { title, author, licence, source, changes } = credit;
-  const terms = licence === "PD" ? "public domain" : licence;
+  const terms = licence === "PD" ? "public domain" : licence.replace(/-/g, " ");
   return `“${title}” by ${author} (${terms}), ${source}${changes ? `; ${changes}` : ""}`;
 }
