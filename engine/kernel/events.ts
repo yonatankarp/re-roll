@@ -61,7 +61,6 @@ export const StoryStateSchema = z.strictObject({
   encounterOutcome: EncounterOutcomeSchema.optional(),
   resources: z.record(z.string(), z.number().int()).optional(),
   restedIn: z.string().optional(), // the scene visit the party last rested in, as "scene#visit"
-  previousScene: z.string().optional(), // the scene the party came from, where a fight without onFlee retreats to
 });
 export type StoryState = Readonly<z.infer<typeof StoryStateSchema>>;
 

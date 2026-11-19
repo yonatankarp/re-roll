@@ -487,17 +487,17 @@ function runApplyEffects(
   }
 }
 
-// Where fleeing leads: the encounter's own onFlee, else back to the scene the party came from.
-// A fight with neither, such as one in the opening scene, can't be fled.
+// Where fleeing leads: the encounter's own onFlee, else back into the scene the fight began in, with the
+// story as it stood before the choice. An earlier scene could lead on along paths that assume a win.
 function fleeEffects(
   run: RunContext,
   state: GameState,
   encounter: string,
 ): readonly StoryEffect[] | undefined {
-  const previous = state.story.previousScene;
+  const { scene } = state.story;
   return (
     run.adventure.encounterOutcomes[encounter]?.onFlee ??
-    (previous === undefined ? undefined : [{ kind: "goto", scene: previous }])
+    (scene === null ? undefined : [{ kind: "goto", scene }])
   );
 }
 
