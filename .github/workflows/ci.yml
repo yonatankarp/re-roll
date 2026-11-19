@@ -141,7 +141,10 @@ jobs:
         if: failure()
         with:
           name: playwright-traces-${{ matrix.browser }}
-          path: test-results/
+          # With the screenshots a missing or changed baseline was written as (tests/ui/visual.e2e.ts).
+          path: |
+            test-results/
+            tests/ui/*-snapshots/
           retention-days: 7
 
   # Nightly: the soak suite and the balance check, outside the unit run.
