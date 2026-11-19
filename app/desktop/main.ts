@@ -38,6 +38,12 @@ import {
   setEffectsOutput,
 } from "../../plugins/systems/dnd5.5e/ui/sound.ts";
 import { shellAudio } from "../../engine/shell/audio.ts";
+import {
+  type SoundCredit,
+  soundCredits,
+} from "../../engine/shell/sound-credits.ts";
+import shellSounds from "../../engine/shell/sounds/credits.json" with { type: "json" };
+import boardSounds from "../../plugins/systems/dnd5.5e/ui/sounds/credits.json" with { type: "json" };
 import { systems } from "../systems.ts";
 
 // CC BY-SA 4.0 asks for the title, the authors, the source and the licence.
@@ -201,7 +207,10 @@ async function start(page: HTMLElement): Promise<void> {
       imageUrl: isTauri() ? tauriImageUrl : contentImageUrl,
     }),
     { [dndUi.systemId]: mountDndBoard },
-    [FONT_CREDIT],
+    [
+      FONT_CREDIT,
+      ...soundCredits([...shellSounds, ...boardSounds] as SoundCredit[]),
+    ],
     coinSound,
   );
 }
