@@ -12,9 +12,12 @@ export async function playUntil(
       name: /^(Carry on|Drive them off|Keep your place)$/,
     })
     .first();
+  // A foe's first sight lays its picture over the page; Escape puts it away, as a player would.
+  const plate = page.locator(".art-plate");
   await expect(async () => {
     if (await ready()) return;
-    if (await onward.isVisible()) await onward.click();
+    if (await plate.isVisible()) await page.keyboard.press("Escape");
+    else if (await onward.isVisible()) await onward.click();
     else await page.keyboard.press("Enter");
     expect(await ready()).toBe(true);
   }).toPass({ intervals: [300], timeout: 30_000 });
