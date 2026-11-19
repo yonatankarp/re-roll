@@ -204,8 +204,8 @@ const PART_FILE_TYPES: [(&str, &[&str]); 5] = [
     ("library", &["md", "json"]),
 ];
 // The loader's ALLOWED_EXTENSIONS in engine/run/loader.ts.
-const PLUGIN_FILE_TYPES: [&str; 10] = [
-    "yaml", "md", "txt", "png", "jpg", "jpeg", "webp", "mp3", "ogg", "wav",
+const PLUGIN_FILE_TYPES: [&str; 11] = [
+    "yaml", "md", "txt", "png", "jpg", "jpeg", "webp", "mp3", "ogg", "wav", "json",
 ];
 const SHARED_FILES: [&str; 1] = ["library/glossary.json"];
 

@@ -33,7 +33,7 @@ import {
 // Reads each scene aloud once with Kokoro-82M and keeps the clips beside the adventure:
 //   npm run narrate -- <adventure> [--voice=af_heart]
 // Unchanged text is skipped; changed text is read again and its old clip removed.
-// Only for adventures under books/, since the clips are made from book text. Needs ffmpeg.
+// Book adventures and shipped ones alike; a book's clips stay in its private folder. Needs ffmpeg.
 
 // Kokoro's phonemiser rethrows uncaught errors with its whole source, so say what went wrong plainly.
 function fail(message: string): never {
@@ -64,11 +64,7 @@ const catalog = await scanPlugins(
   PLUGIN_ROOTS,
 );
 const root = catalog.plugins.get(adventure)?.root;
-if (!root?.startsWith("books/")) {
-  fail(
-    `${adventure} isn't a private adventure here; shipped ones are read aloud in the app`,
-  );
-}
+if (!root) fail(`${adventure} isn't an adventure here`);
 const folder = join(process.cwd(), root, NARRATION_FOLDER);
 const indexPath = join(process.cwd(), root, NARRATION_INDEX);
 const { registry } = await loadAdventure(adventure);

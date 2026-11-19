@@ -556,13 +556,15 @@ The engine also hands `sceneActions` and the UI's `sheets` the scene the party i
 
 **Narration.** `engine/story/narration.ts` names each clip `<voice>/<hash of the text>.mp3` under the adventure's `narration/` folder, so changed text is a new clip. `narration/index.yaml` holds ids, hashes and durations, never text. The loader skips that folder and leaves it out of the plugin hash.
 
-- **Made ahead:** `npm run narrate -- <adventure> [--voice=…]` (`app/cli/narrate.ts`) reads each scene once with Kokoro-82M in Node and encodes it with `ffmpeg`. It runs only on adventures under `books/`, skips unchanged text, and removes a changed text's old clip.
+- **Made ahead:** `npm run narrate -- <adventure> [--voice=…]` (`app/cli/narrate.ts`) reads each scene once with Kokoro-82M in Node and encodes it with `ffmpeg`. It runs on book and shipped adventures alike, skips unchanged text, and removes a changed text's old clip.
 - **Read in the app:** when a clip is missing, `engine/shell/narration-worker.ts` reads the scene in a worker, a sentence at a time, on WebGPU or else WASM. `narration.ts` reads ahead the scenes the current choices lead to, because a CPU reads slower than speech, and restarts a worker that stays silent too long. If no voice can be had, the controls hide rather than fall back to a system voice.
 - **Settings** live in the Sound panel (`sound-panel.ts`), from the game menu.
 
 ### 7.4 Adventure covers
 
-The main menu shows each adventure as a cover card (`engine/shell/adventure-picker.ts`) with a title plate under the picture. A cover is an entry in a `books/assets/<folder>/index.json` art index with `cover: [<adventure id>, …]`. An adventure with no cover, or one whose picture won't load, still gets a designed card with its title and levels. The shipped adventures have none.
+The main menu shows each adventure as a cover card (`engine/shell/adventure-picker.ts`) with a title plate under the picture. A cover is an entry in a `books/assets/<folder>/index.json` art index with `cover: [<adventure id>, …]`, or in an adventure plugin's own `assets/index.json`, which has the same entries (covers, chapter plates, monster portraits and tokens). A plugin's index only fills what no book pictures, so a player with books sees the books' art. An adventure with no cover, or one whose picture won't load, still gets a designed card with its title and levels.
+
+A shipped plugin lists every file in its `assets/` in `assets/credits.json` (`file`, `title`, `author`, `source`, `licence` and optional `changes`). `check-pack` fails a file with no entry, and accepts only CC0, CC BY 3.0 or 4.0 and public domain. The About section of a game shows the credits of its plugins. The shipped adventures' plates are public-domain paintings from Wikimedia Commons, and their tokens and battle map use Lorc's and Delapouite's icons from game-icons.net (CC BY 3.0).
 
 ### 7.5 Roll history, Leads and rewind
 

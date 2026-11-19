@@ -1,7 +1,51 @@
 - id: roadside
+  # Drawn for this road: pines are walls, rocks, dead trees and the horses half cover, brambles difficult.
+  battlemap:
+    image: assets/road-map.webp
+    imageWidth: 1600
+    imageHeight: 1100
+    crop: { x: 0, y: 0, width: 1600, height: 1100 }
+    columns: 16
+    rows: 11
+    walls:
+      - "####..####...###"
+      - "##..h...##..h.##"
+      - "#.......~~......"
+      - ".h...........h.."
+      - "................"
+      - "......hh........"
+      - "................"
+      - "..h........~~..."
+      - "#.....h.......##"
+      - "##..~~...h...###"
+      - "####...####..###"
+    party: [[1, 4], [1, 5], [1, 6], [2, 5]]
+    monsters: [[12, 3], [14, 5], [13, 7]]
   monsters:
     - { monster: "srd52:monster/goblin-warrior", count: 2 }
 - id: rearguard
+  # Drawn for this road: pines are walls, rocks, dead trees and the horses half cover, brambles difficult.
+  battlemap:
+    image: assets/road-map.webp
+    imageWidth: 1600
+    imageHeight: 1100
+    crop: { x: 0, y: 0, width: 1600, height: 1100 }
+    columns: 16
+    rows: 11
+    walls:
+      - "####..####...###"
+      - "##..h...##..h.##"
+      - "#.......~~......"
+      - ".h...........h.."
+      - "................"
+      - "......hh........"
+      - "................"
+      - "..h........~~..."
+      - "#.....h.......##"
+      - "##..~~...h...###"
+      - "####...####..###"
+    party: [[2, 4], [2, 5], [2, 6], [3, 5]]
+    monsters: [[11, 1], [14, 3], [13, 8]]
   monsters:
     - { monster: "srd52:monster/goblin-warrior", count: 1 }
     - { monster: "goblin-ambush:monster/chief", count: 1 }

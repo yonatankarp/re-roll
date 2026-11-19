@@ -1,0 +1,74 @@
+[
+  {
+    "file": "cover.webp",
+    "title": "Road in a Pine Forest (1870)",
+    "author": "Fyodor Vasilyev",
+    "source": "https://commons.wikimedia.org/wiki/File:Vasilyev_Road_in_a_pine_forest_1870_grm.jpg",
+    "licence": "PD",
+    "changes": "resized, WebP"
+  },
+  {
+    "file": "road.webp",
+    "title": "Road in a Pine Forest (1885)",
+    "author": "Ivan Shishkin",
+    "source": "https://commons.wikimedia.org/wiki/File:%D0%94%D0%BE%D1%80%D0%BE%D0%B3%D0%B0_%D0%B2_%D1%81%D0%BE%D1%81%D0%BD%D0%BE%D0%B2%D0%BE%D0%BC_%D0%BB%D0%B5%D1%81%D1%83_(%D0%A8%D0%B8%D1%88%D0%BA%D0%B8%D0%BD).jpg",
+    "licence": "PD",
+    "changes": "cropped, WebP"
+  },
+  {
+    "file": "fight.webp",
+    "title": "Landscape with Travelers Ambushed on a Road at the Edge of a Forest",
+    "author": "Pieter de Neyn",
+    "source": "https://commons.wikimedia.org/wiki/File:Landscape_with_travelers_ambushed_on_a_road_at_the_edge_of_a_forest).webp",
+    "licence": "PD",
+    "changes": "cropped, resized, WebP"
+  },
+  {
+    "file": "village.webp",
+    "title": "Village Road",
+    "author": "Isaac Levitan",
+    "source": "https://commons.wikimedia.org/wiki/File:Isaak_Iljit%C5%A1_Levitan_-_Village_Road_-_A_V_4493_-_Finnish_National_Gallery.jpg",
+    "licence": "PD",
+    "changes": "cropped, resized, WebP"
+  },
+  {
+    "file": "camp.webp",
+    "title": "Camp Fire (1880)",
+    "author": "Winslow Homer",
+    "source": "https://commons.wikimedia.org/wiki/File:Camp_Fire_MET_DT2829.jpg",
+    "licence": "CC0-1.0",
+    "changes": "cropped, resized, WebP"
+  },
+  {
+    "file": "safe-road.webp",
+    "title": "Vladimirka (1892)",
+    "author": "Isaac Levitan",
+    "source": "https://commons.wikimedia.org/wiki/File:Vladimirka_without_frame.jpg",
+    "licence": "PD",
+    "changes": "cropped, resized, WebP"
+  },
+  {
+    "file": "goblin-warrior.webp",
+    "title": "Goblin Head",
+    "author": "Delapouite",
+    "source": "https://game-icons.net/1x1/delapouite/goblin-head.html",
+    "licence": "CC-BY-3.0",
+    "changes": "inked onto a paper ground, WebP"
+  },
+  {
+    "file": "goblin-chief.webp",
+    "title": "Goblin Head and Crown",
+    "author": "Delapouite (Goblin Head) and Lorc (Crown)",
+    "source": "https://game-icons.net/1x1/delapouite/goblin-head.html",
+    "licence": "CC-BY-3.0",
+    "changes": "combined with https://game-icons.net/1x1/lorc/crown.html and inked onto a paper ground, WebP"
+  },
+  {
+    "file": "road-map.webp",
+    "title": "Pine Tree, Dead Wood, Stone Pile and Horse Head icons",
+    "author": "Lorc (Pine Tree, Dead Wood) and Delapouite (Stone Pile, Horse Head)",
+    "source": "https://game-icons.net/",
+    "licence": "CC-BY-3.0",
+    "changes": "drawn as symbols onto an original battle map of the old road"
+  }
+]

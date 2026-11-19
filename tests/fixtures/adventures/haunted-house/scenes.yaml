@@ -1,6 +1,5 @@
 - id: hallway
   text: The hallway smells of cold ash and old roses.
-  art: assets/hallway.txt
   choices:
     - label: Try the cellar door
       effects:

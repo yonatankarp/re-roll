@@ -1,0 +1,14 @@
+[
+  { "file": "cover.webp", "cover": ["goblin-ambush"] },
+  {
+    "file": "goblin-warrior.webp",
+    "monster": "srd52:monster/goblin-warrior",
+    "face": { "x": 0.5, "y": 0.52, "size": 0.7 }
+  },
+  {
+    "file": "goblin-chief.webp",
+    "monster": "goblin-ambush:monster/chief",
+    "subjects": ["goblin chief"],
+    "face": { "x": 0.5, "y": 0.55, "size": 0.7 }
+  }
+]

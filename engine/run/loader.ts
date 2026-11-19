@@ -34,6 +34,7 @@ export const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
   ".mp3",
   ".ogg",
   ".wav",
+  ".json", // a plugin's assets/index.json and assets/credits.json: data, never code
 ]);
 
 const KIND_FOLDERS = [

@@ -470,10 +470,10 @@ describe("playing through the shell's session", () => {
     const covers = Object.fromEntries(
       (await game.listAdventures()).map((item) => [item.id, item.cover]),
     );
-    // A cover that isn't a picture is dropped, so that adventure shows its plate.
+    // A book's cover beats the adventure's own, and one that isn't a picture is dropped for it.
     expect(covers).toEqual({
       "haunted-house": "books/assets/book/cover.jpg",
-      "goblin-ambush": null,
+      "goblin-ambush": "plugins/adventures/goblin-ambush/assets/cover.webp",
     });
   });
 
@@ -568,9 +568,9 @@ describe("playing through the shell's session", () => {
 
   it("tells a dead character from a fallen party and from a win", async () => {
     // One pinned seed per ending (#209). When the rules change what a seed does, pin another.
-    const pinned = { 1: "ending", 21: "died" };
+    const pinned = { 3: "ending", 21: "died" };
     const endings: Record<string, string> = {};
-    for (const seed of [1, 21]) {
+    for (const seed of [3, 21]) {
       const game = newGame();
       // On Normal the companions stabilize a dying Wizard, so a death is rare there.
       await game.start("goblin-ambush", `endings-${String(seed)}`, {
@@ -765,6 +765,48 @@ describe("playing through the shell's session", () => {
     });
   });
 
+  it("shows the shipped adventures' own art and credits with no books", async () => {
+    const content = createContentReader(url);
+    const game = createGame({
+      storage: withSaves(
+        {
+          read: (path) => content.read(path),
+          list: (prefix) =>
+            prefix.startsWith("books")
+              ? Promise.resolve([])
+              : content.list(prefix),
+        },
+        memorySaves(),
+      ),
+      roots: ["plugins"],
+      systems,
+      uis: [dndUi],
+    });
+    const shipped = "plugins/adventures/goblin-ambush/assets/";
+    await game.start("goblin-ambush", "desktop-test-1");
+    await chooseCharacter(game, "Fighter");
+    expect(game.view().cover).toBe(`${shipped}cover.webp`);
+    expect(game.view().sceneArt).toBe(`${shipped}road.webp`);
+    expect(
+      game.view().attributions.some((line) => line.includes("Pieter de Neyn")),
+    ).toBe(true);
+    for (let count = 0; count < 100 && !game.view().combat; count += 1) {
+      await firstOption(game);
+    }
+    const fight = game.view();
+    expect(Object.keys(fight.monsterArt).length).toBeGreaterThan(0);
+    for (const path of [
+      ...Object.values(fight.monsterArt),
+      ...Object.values(fight.tokenArt).map((token) => token.path),
+    ])
+      expect(path.startsWith(`${shipped}goblin-`)).toBe(true);
+    await game.start("haunted-house", "desktop-test-1");
+    await chooseCharacter(game, "Fighter");
+    expect(game.view().sceneArt).toBe(
+      "plugins/adventures/haunted-house/assets/hallway.webp",
+    );
+  });
+
   it("finds a monster's picture by name and ignores art that isn't an image", async () => {
     const content = createContentReader(url);
     const game = createGame({
@@ -803,9 +845,6 @@ describe("playing through the shell's session", () => {
     expect(new Set(Object.values(game.view().monsterArt))).toEqual(
       new Set(["books/assets/book/a.png"]),
     );
-    await game.start("haunted-house", "desktop-test-1");
-    // Its only art is a text file, which must never reach an <img>.
-    expect(game.view().sceneArt).toBeNull();
   });
 
   it("finds chapter, item and coin pictures, a monster's through subjects, a save's cover, and a book's cover for the rest", async () => {
@@ -832,7 +871,12 @@ describe("playing through the shell's session", () => {
                     { file: "srd.jpg", cover: ["srd52"] },
                   ]),
                 )
-              : content.read(path),
+              : path === "plugins/adventures/goblin-ambush/scenes.yaml"
+                ? // Without its scene pictures, so a save falls back to the cover.
+                  content
+                    .read(path)
+                    .then((text) => text?.replace(/^  art: .*\n/gm, "") ?? null)
+                : content.read(path),
           list: (prefix) =>
             prefix === "books/assets"
               ? Promise.resolve([

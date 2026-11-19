@@ -777,3 +777,68 @@ describe("macOS folder metadata", () => {
     ).toContain("symlinks are not allowed");
   });
 });
+
+describe("a shipped plugin's own art", () => {
+  const credit = (file: string, licence: string) => ({
+    file,
+    title: "A Picture",
+    author: "Someone",
+    source: "https://example.com/picture",
+    licence,
+  });
+  const check = async (assets: Record<string, unknown>) => {
+    const files = adventureFiles("tale");
+    for (const [name, value] of Object.entries(assets))
+      files[`plugins/adventures/tale/assets/${name}`] =
+        typeof value === "string" ? value : JSON.stringify(value);
+    const report = await checkPlugins(
+      memoryStorage(files),
+      ["plugins"],
+      [d6System],
+    );
+    return report.issues.map(
+      (issue) => `${issue.file ?? ""}: ${issue.message}`,
+    );
+  };
+
+  it("passes when every file is pictured, credited and licensed to ship", async () => {
+    expect(
+      await check({
+        "a.webp": "x",
+        "index.json": [{ file: "a.webp", cover: ["tale"] }],
+        "credits.json": [credit("a.webp", "CC-BY-4.0")],
+      }),
+    ).toEqual([]);
+  });
+
+  it("reports missing pictures, unknown covers and uncredited files", async () => {
+    const issues = await check({
+      "a.webp": "x",
+      "b.webp": "x",
+      "index.json": [
+        { file: "gone.webp" },
+        { file: "a.webp", cover: ["nope"], chapter: ["tale:nowhere"] },
+      ],
+      "credits.json": [credit("a.webp", "PD")],
+    });
+    expect(issues).toEqual([
+      expect.stringContaining("gone.webp: no such file"),
+      expect.stringContaining('cover of "nope"'),
+      expect.stringContaining('chapter "tale:nowhere" names no scene'),
+      "plugins/adventures/tale/assets/b.webp: shipped with no entry in assets/credits.json",
+    ]);
+  });
+
+  it("rejects a licence that doesn't allow shipping", async () => {
+    const issues = await check({
+      "a.webp": "x",
+      "credits.json": [credit("a.webp", "CC-BY-NC-4.0")],
+    });
+    expect(
+      issues.some((issue) => issue.includes("credits.json: 0.licence")),
+    ).toBe(true);
+    expect(issues).toContain(
+      "plugins/adventures/tale/assets/a.webp: shipped with no entry in assets/credits.json",
+    );
+  });
+});
