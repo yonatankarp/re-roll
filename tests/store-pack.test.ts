@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { unzipSync } from "fflate";
 import { afterEach, describe, expect, it } from "vitest";
 import { planInstall } from "../engine/platform/tauri/install.ts";
 import { StoreIndexSchema } from "../engine/shell/store-index.ts";
@@ -107,6 +108,35 @@ describe("packStore", () => {
     // The book's sources never leave, and the same files make the same zip.
     expect(unpacked).toEqual(["assets/lost-mine"]);
     expect((await packStore(root)).index).toEqual(index);
+  });
+
+  it("leaves out a book's pictures that no tag in its art index shows", async () => {
+    await store({
+      ...BOOK,
+      "assets/phb/index.json": JSON.stringify([
+        { file: "p001.webp", monster: "phb:monster/x" },
+        { file: "p002.webp", kind: "scene" },
+        { file: "p003.webp", items: [] },
+      ]),
+      "assets/phb/p002.webp": "webp",
+      "assets/phb/p003.webp": "webp",
+      "assets/phb/p004.webp": "webp",
+      "store.yaml": `packages:
+  - id: phb
+    title: Player's Handbook
+    parts: [rules/phb, assets/phb]
+`,
+    });
+    const { zips, untagged } = await packStore(root);
+    expect(untagged).toEqual([
+      "assets/phb/p002.webp",
+      "assets/phb/p003.webp",
+      "assets/phb/p004.webp",
+    ]);
+    const files = Object.keys(
+      unzipSync(zips.get("phb.zip") ?? new Uint8Array()),
+    ).filter((path) => path.startsWith("assets/"));
+    expect(files).toEqual(["assets/phb/index.json", "assets/phb/p001.webp"]);
   });
 
   it("refuses a store.yaml whose packages overlap or name what isn't there", async () => {

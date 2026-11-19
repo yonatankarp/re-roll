@@ -29,6 +29,40 @@ export interface PackedStore {
   readonly zips: ReadonlyMap<string, Uint8Array>;
   // Content folders no package holds, which the publisher may have forgotten.
   readonly unpacked: readonly string[];
+  // Book pictures left out because no tag in their art index lets the game show them.
+  readonly untagged: readonly string[];
+}
+
+const PICTURE = /\.(png|jpe?g|webp|gif)$/i;
+// The index fields the game finds a book's art by (session.ts loadArt); a picture with none of them never shows.
+const TAGS = ["monster", "subjects", "cover", "chapter", "items", "treasure"];
+
+// The pictures in an assets folder that its index tags, as paths relative to `root`;
+// null when the folder has no index to go by, so everything in it is packed.
+async function taggedPictures(
+  root: string,
+  part: string,
+): Promise<Set<string> | null> {
+  if (!part.startsWith("assets/")) return null;
+  let entries: unknown;
+  try {
+    entries = JSON.parse(
+      await readFile(join(root, part, "index.json"), "utf8"),
+    );
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(entries)) return null;
+  const tagged = new Set<string>();
+  for (const entry of entries as Record<string, unknown>[]) {
+    const tags = TAGS.map((tag) => entry[tag]);
+    if (
+      typeof entry.file === "string" &&
+      tags.some((tag) => (Array.isArray(tag) ? tag.length > 0 : Boolean(tag)))
+    )
+      tagged.add(`${part}/${entry.file}`);
+  }
+  return tagged;
 }
 
 // Every file under a folder, as paths relative to `root`, hidden names left out as the game leaves them.
@@ -75,6 +109,7 @@ export async function packStore(root: string): Promise<PackedStore> {
 
   const packages: StorePackage[] = [];
   const zips = new Map<string, Uint8Array>();
+  const untagged: string[] = [];
   for (const { id, title, parts } of manifest.packages) {
     const entries: Zippable = {};
     const plugins: StorePackage["plugins"] = [];
@@ -85,7 +120,12 @@ export async function packStore(root: string): Promise<PackedStore> {
         throw new Error(
           `${part}, in ${id}, isn't a ${shared ? "file" : "folder"} in ${root}.`,
         );
+      const tagged = shared ? null : await taggedPictures(root, part);
       for (const path of shared ? [part] : await filesUnder(root, part)) {
+        if (tagged && PICTURE.test(path) && !tagged.has(path)) {
+          untagged.push(path);
+          continue;
+        }
         entries[path] = [
           await readFile(join(root, path)),
           { level: STORED.test(path) ? 0 : 6, mtime: MTIME },
@@ -138,5 +178,5 @@ export async function packStore(root: string): Promise<PackedStore> {
         unpacked.push(part);
     }
   }
-  return { index: { format: 1, packages }, zips, unpacked };
+  return { index: { format: 1, packages }, zips, unpacked, untagged };
 }
