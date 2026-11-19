@@ -1,7 +1,6 @@
 - id: srd52:monster/apparatus-of-the-crab
   name: Apparatus of the Crab
   # The SRD makes it a Large object; a crewed machine plays as a Construct, as animated objects are.
-  size: large
   creatureType: construct
   ac: 20
   hp: 200
@@ -9,6 +8,7 @@
   speeds:
     walk: 30
     swim: 30
+  size: large
   abilities:
     str: 10
     dex: 10
@@ -68,14 +68,6 @@
   initiative: 1
   multiattack: 1
   actions: []
-  text: |-
-    Large Beast, Unaligned
-    AC 11 Initiative +1 (11)
-    HP 19 (3d10 + 3)
-    Speed 30 ft., Fly 60 ft.
-    Senses Darkvision 60 ft.; Passive Perception 10
-    Languages None
-    CR 0 (XP 0; PB +2)
 - id: srd52:monster/avatar-of-death
   name: Avatar of Death
   size: medium
@@ -139,4 +131,3 @@
             - amount:
                 dice: 1d8
               type: necrotic
-  text: The Avatar of Death the Skull card of a Deck of Many Things summons.
