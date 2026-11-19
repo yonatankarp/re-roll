@@ -14,7 +14,7 @@ import { ALLOWED_EXTENSIONS, extensionOf } from "../../run/loader.ts";
 // or a book laid out like the content folder: adventures/<id>, rules/<id>, worlds/<id>, assets/<book>, library/<book>.
 
 const MANIFEST = "plugin.yaml";
-// shortcut: each file is unpacked into memory on its own, but the zip itself is held whole; stream it if zips grow past this.
+// shortcut: each file is unpacked into memory on its own, but the zip itself is held whole (a Store download is capped at 1 GB in main.rs); stream it if zips grow toward that.
 export const MAX_UNPACKED_BYTES = 4 * 1024 ** 3;
 
 export const PART_FOLDERS = [
