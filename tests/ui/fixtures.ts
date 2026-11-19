@@ -9,6 +9,8 @@ const WATCH_CSP = `document.addEventListener("securitypolicyviolation", (event) 
   window.reportCsp(event.violatedDirective + " blocked " + (event.blockedURI || "inline") + " at " + event.sourceFile + ":" + event.lineNumber + ":" + event.columnNumber + (event.sample ? " (" + event.sample + ")" : ""));
 });`;
 
+const SEED = "5eed0001";
+
 // Every test plays under the desktop app's CSP and fails on a violation, a console error or an
 // uncaught error. `problems` is the list, for a test that checks the watch itself.
 export const test = base.extend<{ problems: string[] }>({
@@ -20,6 +22,11 @@ export const test = base.extend<{ problems: string[] }>({
       problems.push(`CSP: ${text}`);
     });
     await page.addInitScript(WATCH_CSP);
+    // A run's seed is the only thing the page draws from randomUUID, so every test plays the same dice:
+    // with a random one the party's allies sometimes won the first fight before the hero's turn.
+    await page.addInitScript(
+      `crypto.randomUUID = () => "${SEED}-0000-4000-8000-000000000000";`,
+    );
     page.on("console", (message) => {
       if (message.type() !== "error") return;
       // WebKit logs the <select> one above too, without saying where; the event reports any real one.

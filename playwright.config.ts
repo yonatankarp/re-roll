@@ -26,6 +26,7 @@ export default defineConfig({
   testMatch: "*.e2e.ts", // not *.test.ts or *.spec.ts, which vitest would pick up
   forbidOnly: Boolean(process.env.CI),
   timeout: 60_000, // WebKit on a CI runner plays the longer tests near the 30 s default
+  expect: { timeout: 10_000 }, // opening an adventure, with the whole SRD, can pass 5 s on a busy runner
   // A retry tells a flaky test from a broken one, and a test that passes only on its retry still fails the run.
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: Boolean(process.env.CI),
