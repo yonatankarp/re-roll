@@ -149,12 +149,16 @@ test("the die waits as a focused button and the foe's plate has a way out", asyn
   const leave = plate.getByRole("button", { name: /^Continue/ });
   await expect(leave).toHaveAttribute("aria-keyshortcuts", "Escape");
   await expect(plate).toContainText("Esc");
+  // It gives focus back to whatever had it as the plate came, which in play may be nothing at all.
   await leave.focus();
   await page.keyboard.press("Enter");
   await expect(plate).toBeHidden();
-  await expect
-    .poll(() => page.evaluate(() => document.activeElement?.tagName))
-    .not.toBe("BODY");
+  expect(
+    await page.evaluate(
+      () =>
+        !document.querySelector(".art-plate")?.contains(document.activeElement),
+    ),
+  ).toBe(true);
 
   // The battle map, once the fight starts.
   await playUntil(page, () => page.locator(".dnd-cell").first().isVisible());
