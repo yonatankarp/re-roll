@@ -1075,7 +1075,7 @@ describe("playing a D&D adventure", () => {
   it("really fights: monsters take damage, and fights end in a win or a defeat", async () => {
     const run = await goblin();
     // One pinned seed per outcome (#209). The soak run plays all 120.
-    const pinned = { "fight-2": "win", "fight-15": "defeat" };
+    const pinned = { "fight-2": "win", "fight-38": "defeat" };
     const seeds = SOAK
       ? Array.from({ length: 120 }, (_, index) => `fight-${String(index)}`)
       : Object.keys(pinned);
@@ -1132,7 +1132,7 @@ describe("playing a D&D adventure", () => {
 
   it("clears monsters and the combat when a fight is won", async () => {
     const run = await goblin();
-    const played = playRun(run, "clear-1", { maxDecisions: 500 }); // a pinned seed that wins its fight (#209)
+    const played = playRun(run, "clear-2", { maxDecisions: 500 }); // a pinned seed that wins its fight (#209)
     const events = played.log.flatMap((entry) => entry.events);
     expect(
       played.outcome === "ending" &&

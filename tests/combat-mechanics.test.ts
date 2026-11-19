@@ -1386,7 +1386,8 @@ describe("choosing targets and aiming areas", () => {
     for (let count = 0; pending && count < 400; count += 1) {
       const { id, options, actor: who } = pending;
       const has = (option: string) => options.some((o) => o.id === option);
-      let chosen = options[0]?.id ?? "";
+      // Never flee: the road before the fight is a way out now, and this test stays in the fight.
+      let chosen = options.find((o) => o.id !== "flee")?.id ?? "";
       if (has("srd52:pregen/wizard")) chosen = "srd52:pregen/wizard";
       else if (who === PLAYER_ACTOR && !done.bless && has(`${bless}|pick`)) {
         chosen = `${bless}|pick`;

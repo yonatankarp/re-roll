@@ -18,6 +18,7 @@ console.log(
 for (const path of report.cropped) console.log(`cropped: ${path}`);
 for (const path of report.uncropped)
   console.log(`uncropped (a scene shows it whole): ${path}`);
+for (const path of report.shrunk) console.log(`shrunk: ${path}`);
 for (const line of report.skipped) console.log(`skipped: ${line}`);
 for (const line of report.missing)
   console.log(`missing (not in the books in any format): ${line}`);
